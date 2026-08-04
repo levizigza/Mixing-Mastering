@@ -1,0 +1,1095 @@
+import { Preset, CompressorSettings, EQBand, SaturationSettings } from '@/types/audio';
+
+// ─── Compressor Archetypes ───────────────────────────────────────
+// These represent fundamentally different approaches to dynamics
+
+const transparentComp: CompressorSettings = {
+  threshold: -12,
+  ratio: 1.5,
+  attack: 0.02,
+  release: 0.3,
+  knee: 30,
+  makeupGain: 0.5,
+};
+
+const vocalRideComp: CompressorSettings = {
+  threshold: -20,
+  ratio: 3,
+  attack: 0.004,
+  release: 0.12,
+  knee: 10,
+  makeupGain: 3,
+};
+
+const punchyComp: CompressorSettings = {
+  threshold: -22,
+  ratio: 4.5,
+  attack: 0.001,
+  release: 0.06,
+  knee: 5,
+  makeupGain: 4,
+};
+
+const crushComp: CompressorSettings = {
+  threshold: -30,
+  ratio: 10,
+  attack: 0.0005,
+  release: 0.04,
+  knee: 3,
+  makeupGain: 8,
+};
+
+const glueComp: CompressorSettings = {
+  threshold: -16,
+  ratio: 2,
+  attack: 0.01,
+  release: 0.15,
+  knee: 20,
+  makeupGain: 1.5,
+};
+
+const slowSqueezeComp: CompressorSettings = {
+  threshold: -18,
+  ratio: 3,
+  attack: 0.03,
+  release: 0.4,
+  knee: 25,
+  makeupGain: 2,
+};
+
+// ─── Saturation Archetypes ──────────────────────────────────────
+
+const cleanSat: SaturationSettings = { drive: 3, mix: 5 };
+const warmTapeSat: SaturationSettings = { drive: 15, mix: 25 };
+const hotTubeSat: SaturationSettings = { drive: 25, mix: 35 };
+const crunchSat: SaturationSettings = { drive: 40, mix: 45 };
+const destroySat: SaturationSettings = { drive: 60, mix: 55 };
+
+export const presets: Preset[] = [
+  // ═══════════════════════════════════════════════════════════════
+  // GENRE PRESETS
+  // ═══════════════════════════════════════════════════════════════
+  {
+    id: 'pop-bright',
+    name: 'Pop — Bright & Polished',
+    category: 'genre',
+    description: 'Radio-ready clarity. Vocal way up front, tight controlled low end, sparkly tops, everything in its place.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -12, Q: 0.7, type: 'highpass' },
+          { frequency: 200, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 3000, gain: 4, Q: 1.2, type: 'peaking' },
+          { frequency: 5000, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: 4, Q: 0.6, type: 'highshelf' },
+          { frequency: 14000, gain: 3, Q: 0.4, type: 'highshelf' },
+        ],
+        compressor: { ...vocalRideComp, threshold: -22, ratio: 3.5, makeupGain: 4 },
+        saturation: cleanSat,
+        gain: 2,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 60, gain: 3, Q: 1.2, type: 'peaking' },
+          { frequency: 250, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -3, Q: 2.0, type: 'peaking' },
+          { frequency: 4000, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: 3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -20, ratio: 4 },
+        saturation: cleanSat,
+        gain: 0,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 40, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 80, gain: 3, Q: 1.2, type: 'peaking' },
+          { frequency: 200, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 700, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 3000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...glueComp, threshold: -18, ratio: 4, attack: 0.005 },
+        saturation: cleanSat,
+        gain: -2,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 150, gain: -6, Q: 0.8, type: 'highpass' },
+          { frequency: 300, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 2000, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 4, Q: 0.6, type: 'highshelf' },
+          { frequency: 12000, gain: 3, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: glueComp,
+        saturation: cleanSat,
+        gain: -4,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: -6, Q: 0.7, type: 'highpass' },
+        { frequency: 200, gain: -2, Q: 1.0, type: 'peaking' },
+        { frequency: 4000, gain: 2, Q: 0.8, type: 'peaking' },
+        { frequency: 12000, gain: 3, Q: 0.5, type: 'highshelf' },
+      ],
+      compressor: { ...glueComp, threshold: -12, ratio: 2.5, makeupGain: 2 },
+      limiter: { threshold: -0.5, release: 0.04 },
+      saturation: cleanSat,
+      stereoWidth: { width: 1.15 },
+      gain: 1,
+    },
+  },
+  {
+    id: 'hiphop-heavy',
+    name: 'Hip-Hop — Heavy 808s',
+    category: 'genre',
+    description: 'Massive sub bass owns the bottom. Punchy kick, aggressive vocal presence, everything sidechained to the low end.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 100, gain: -12, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: -4, Q: 1.8, type: 'peaking' },
+          { frequency: 2500, gain: 5, Q: 1.2, type: 'peaking' },
+          { frequency: 5000, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -24, ratio: 6, attack: 0.001, makeupGain: 6 },
+        saturation: warmTapeSat,
+        gain: 3,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 50, gain: 6, Q: 1.0, type: 'peaking' },
+          { frequency: 100, gain: 4, Q: 1.2, type: 'peaking' },
+          { frequency: 300, gain: -6, Q: 1.8, type: 'peaking' },
+          { frequency: 500, gain: -4, Q: 2.0, type: 'peaking' },
+          { frequency: 4000, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: 3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -18, ratio: 5, attack: 0.0005 },
+        saturation: warmTapeSat,
+        gain: 2,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 30, gain: 8, Q: 0.7, type: 'lowshelf' },
+          { frequency: 60, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 150, gain: 3, Q: 1.2, type: 'peaking' },
+          { frequency: 300, gain: -6, Q: 1.5, type: 'peaking' },
+          { frequency: 600, gain: -8, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...crushComp, threshold: -18, ratio: 8, attack: 0.003 },
+        saturation: hotTubeSat,
+        gain: 4,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 200, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 400, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 3000, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: -2, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: slowSqueezeComp,
+        saturation: warmTapeSat,
+        gain: -6,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 25, gain: 4, Q: 0.7, type: 'lowshelf' },
+        { frequency: 200, gain: -3, Q: 1.2, type: 'peaking' },
+        { frequency: 3000, gain: 3, Q: 1.0, type: 'peaking' },
+        { frequency: 8000, gain: 2, Q: 0.7, type: 'highshelf' },
+      ],
+      compressor: { ...punchyComp, threshold: -14, ratio: 3, makeupGain: 3 },
+      limiter: { threshold: -0.3, release: 0.025 },
+      saturation: warmTapeSat,
+      stereoWidth: { width: 1.0 },
+      gain: 2,
+    },
+  },
+  {
+    id: 'rock-punchy',
+    name: 'Rock — Punchy & Raw',
+    category: 'genre',
+    description: 'Midrange-forward aggression. Crunchy guitars, driving drums, bass with growl. Everything hitting hard.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 100, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 250, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 1500, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 3500, gain: 3, Q: 1.2, type: 'peaking' },
+          { frequency: 8000, gain: 2, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...vocalRideComp, threshold: -24, ratio: 4, makeupGain: 4 },
+        saturation: warmTapeSat,
+        gain: 1,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 80, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 250, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -4, Q: 2.0, type: 'peaking' },
+          { frequency: 3000, gain: 5, Q: 1.2, type: 'peaking' },
+          { frequency: 6000, gain: 4, Q: 0.8, type: 'peaking' },
+          { frequency: 10000, gain: 3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -20, ratio: 5, attack: 0.001, makeupGain: 5 },
+        saturation: hotTubeSat,
+        gain: 2,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 60, gain: 4, Q: 1.0, type: 'lowshelf' },
+          { frequency: 200, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 700, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 1500, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 4000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...punchyComp, threshold: -20, ratio: 5, attack: 0.005 },
+        saturation: hotTubeSat,
+        gain: 0,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 100, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 1200, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 3000, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 6000, gain: 3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...glueComp, threshold: -18, ratio: 3, makeupGain: 2 },
+        saturation: crunchSat,
+        gain: 1,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 40, gain: -4, Q: 0.7, type: 'highpass' },
+        { frequency: 250, gain: -2, Q: 1.0, type: 'peaking' },
+        { frequency: 2000, gain: 3, Q: 0.8, type: 'peaking' },
+        { frequency: 5000, gain: 2, Q: 0.7, type: 'peaking' },
+      ],
+      compressor: { ...glueComp, threshold: -14, ratio: 3, makeupGain: 3 },
+      limiter: { threshold: -0.5, release: 0.04 },
+      saturation: hotTubeSat,
+      stereoWidth: { width: 1.2 },
+      gain: 1,
+    },
+  },
+  {
+    id: 'edm-loud',
+    name: 'EDM — Loud & Wide',
+    category: 'genre',
+    description: 'Maximum energy. Slamming transients, massive stereo field, scooped mids, sub bass and crispy highs.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 120, gain: -12, Q: 0.7, type: 'highpass' },
+          { frequency: 400, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 3000, gain: 5, Q: 1.2, type: 'peaking' },
+          { frequency: 8000, gain: 4, Q: 0.7, type: 'highshelf' },
+          { frequency: 14000, gain: 3, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -22, ratio: 6, makeupGain: 5 },
+        saturation: warmTapeSat,
+        gain: 0,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 50, gain: 6, Q: 1.0, type: 'peaking' },
+          { frequency: 150, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 350, gain: -6, Q: 2.0, type: 'peaking' },
+          { frequency: 5000, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: 5, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -16, ratio: 8, attack: 0.0003, makeupGain: 7 },
+        saturation: hotTubeSat,
+        gain: 3,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 30, gain: 8, Q: 0.7, type: 'lowshelf' },
+          { frequency: 80, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: -6, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -8, Q: 2.0, type: 'peaking' },
+          { frequency: 800, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...crushComp, threshold: -14, ratio: 10, attack: 0.002 },
+        saturation: crunchSat,
+        gain: 3,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 200, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 500, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 3000, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 5, Q: 0.6, type: 'highshelf' },
+          { frequency: 14000, gain: 4, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -20, ratio: 4 },
+        saturation: warmTapeSat,
+        gain: -2,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: 5, Q: 0.7, type: 'lowshelf' },
+        { frequency: 300, gain: -4, Q: 1.5, type: 'peaking' },
+        { frequency: 5000, gain: 4, Q: 0.8, type: 'peaking' },
+        { frequency: 12000, gain: 5, Q: 0.5, type: 'highshelf' },
+      ],
+      compressor: { ...crushComp, threshold: -10, ratio: 4, makeupGain: 5 },
+      limiter: { threshold: -0.1, release: 0.015 },
+      saturation: hotTubeSat,
+      stereoWidth: { width: 1.6 },
+      gain: 2,
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // MOOD PRESETS
+  // ═══════════════════════════════════════════════════════════════
+  {
+    id: 'chill-ambient',
+    name: 'Lo-Fi — Warm & Dusty',
+    category: 'mood',
+    description: 'Vinyl warmth, rolled-off highs, tape saturation, soft dynamics. Like listening through a warm haze.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 2000, gain: -2, Q: 1.0, type: 'peaking' },
+          { frequency: 6000, gain: -4, Q: 0.7, type: 'highshelf' },
+          { frequency: 12000, gain: -8, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -16, ratio: 2.5 },
+        saturation: warmTapeSat,
+        gain: -1,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 60, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 500, gain: -2, Q: 1.5, type: 'peaking' },
+          { frequency: 4000, gain: -3, Q: 0.8, type: 'peaking' },
+          { frequency: 8000, gain: -6, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -20, ratio: 3 },
+        saturation: hotTubeSat,
+        gain: -2,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 50, gain: 3, Q: 0.8, type: 'lowshelf' },
+          { frequency: 150, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 300, gain: -2, Q: 1.5, type: 'peaking' },
+          { frequency: 2000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -16, ratio: 2 },
+        saturation: warmTapeSat,
+        gain: -1,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 100, gain: -4, Q: 0.7, type: 'highpass' },
+          { frequency: 250, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 800, gain: 1, Q: 0.8, type: 'peaking' },
+          { frequency: 5000, gain: -5, Q: 0.7, type: 'highshelf' },
+          { frequency: 10000, gain: -8, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: slowSqueezeComp,
+        saturation: hotTubeSat,
+        gain: -2,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: -4, Q: 0.7, type: 'highpass' },
+        { frequency: 150, gain: 2, Q: 0.7, type: 'lowshelf' },
+        { frequency: 3000, gain: -2, Q: 1.0, type: 'peaking' },
+        { frequency: 8000, gain: -5, Q: 0.6, type: 'highshelf' },
+        { frequency: 14000, gain: -8, Q: 0.5, type: 'highshelf' },
+      ],
+      compressor: { ...slowSqueezeComp, threshold: -12, ratio: 2, makeupGain: 1 },
+      limiter: { threshold: -2, release: 0.12 },
+      saturation: hotTubeSat,
+      stereoWidth: { width: 0.9 },
+      gain: -1,
+    },
+  },
+  {
+    id: 'ethereal-dream',
+    name: 'Ethereal — Magical & Atmospheric',
+    category: 'mood',
+    description: 'Dreamy shoegaze-inspired. Ultra-wide stereo, shimmering highs, vocals floating in space, everything washed in air.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 250, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -3, Q: 2.0, type: 'peaking' },
+          { frequency: 3000, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 8000, gain: 5, Q: 0.6, type: 'highshelf' },
+          { frequency: 12000, gain: 6, Q: 0.4, type: 'highshelf' },
+          { frequency: 16000, gain: 5, Q: 0.4, type: 'highshelf' },
+        ],
+        compressor: { ...transparentComp, threshold: -14, ratio: 1.5, attack: 0.025, release: 0.5 },
+        saturation: cleanSat,
+        gain: -1,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 60, gain: 1, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -4, Q: 2.0, type: 'peaking' },
+          { frequency: 2000, gain: -3, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 4, Q: 0.6, type: 'highshelf' },
+          { frequency: 14000, gain: 5, Q: 0.4, type: 'highshelf' },
+        ],
+        compressor: { ...transparentComp, threshold: -16, ratio: 1.8, attack: 0.02 },
+        saturation: cleanSat,
+        gain: -6,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 40, gain: 2, Q: 0.8, type: 'lowshelf' },
+          { frequency: 150, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 300, gain: -5, Q: 1.8, type: 'peaking' },
+          { frequency: 800, gain: -3, Q: 1.0, type: 'peaking' },
+          { frequency: 3000, gain: -8, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...transparentComp, threshold: -14, ratio: 2, attack: 0.015 },
+        saturation: cleanSat,
+        gain: -4,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 120, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -3, Q: 2.0, type: 'peaking' },
+          { frequency: 3000, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 6000, gain: 5, Q: 0.6, type: 'highshelf' },
+          { frequency: 10000, gain: 6, Q: 0.5, type: 'highshelf' },
+          { frequency: 14000, gain: 5, Q: 0.4, type: 'highshelf' },
+        ],
+        compressor: { ...transparentComp, threshold: -12, ratio: 1.5, release: 0.6 },
+        saturation: cleanSat,
+        gain: 0,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: -4, Q: 0.7, type: 'highpass' },
+        { frequency: 200, gain: -3, Q: 1.0, type: 'peaking' },
+        { frequency: 400, gain: -2, Q: 1.5, type: 'peaking' },
+        { frequency: 6000, gain: 4, Q: 0.7, type: 'highshelf' },
+        { frequency: 10000, gain: 5, Q: 0.5, type: 'highshelf' },
+        { frequency: 14000, gain: 5, Q: 0.4, type: 'highshelf' },
+      ],
+      compressor: { ...transparentComp, threshold: -10, ratio: 1.3, makeupGain: 0.5 },
+      limiter: { threshold: -2, release: 0.15 },
+      saturation: cleanSat,
+      stereoWidth: { width: 1.7 },
+      gain: -1,
+    },
+  },
+  {
+    id: 'dark-moody',
+    name: 'Dark & Moody — Midnight',
+    category: 'mood',
+    description: 'Heavy low end, subdued highs, intimate vocals, everything sitting in shadow. Drake Take Care vibes.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 200, gain: -2, Q: 1.5, type: 'peaking' },
+          { frequency: 1500, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 4000, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: -3, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: { ...vocalRideComp, threshold: -18, ratio: 2.5, attack: 0.008 },
+        saturation: warmTapeSat,
+        gain: 2,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 40, gain: 5, Q: 0.8, type: 'lowshelf' },
+          { frequency: 200, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -4, Q: 2.0, type: 'peaking' },
+          { frequency: 3000, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: -4, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -22, ratio: 3.5 },
+        saturation: warmTapeSat,
+        gain: -1,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 30, gain: 6, Q: 0.7, type: 'lowshelf' },
+          { frequency: 80, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: -2, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -5, Q: 2.0, type: 'peaking' },
+          { frequency: 1000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...glueComp, threshold: -16, ratio: 4, attack: 0.008 },
+        saturation: hotTubeSat,
+        gain: 3,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 150, gain: -4, Q: 0.7, type: 'highpass' },
+          { frequency: 400, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 2000, gain: -2, Q: 1.0, type: 'peaking' },
+          { frequency: 5000, gain: 1, Q: 0.8, type: 'peaking' },
+          { frequency: 10000, gain: -5, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: slowSqueezeComp,
+        saturation: warmTapeSat,
+        gain: -4,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 25, gain: 4, Q: 0.7, type: 'lowshelf' },
+        { frequency: 300, gain: -2, Q: 1.2, type: 'peaking' },
+        { frequency: 3000, gain: 1, Q: 1.0, type: 'peaking' },
+        { frequency: 10000, gain: -4, Q: 0.6, type: 'highshelf' },
+      ],
+      compressor: { ...glueComp, threshold: -14, ratio: 2.5, makeupGain: 2 },
+      limiter: { threshold: -1, release: 0.06 },
+      saturation: warmTapeSat,
+      stereoWidth: { width: 1.1 },
+      gain: 0,
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // MASTERING PRESETS
+  // ═══════════════════════════════════════════════════════════════
+  {
+    id: 'mastering-transparent',
+    name: 'Mastering — Transparent',
+    category: 'mastering',
+    description: 'Clean and honest. Barely touches the mix — just tames peaks, adds tiny amount of glue. For mixes that are already good.',
+    stems: {},
+    master: {
+      eq: [
+        { frequency: 25, gain: -4, Q: 0.7, type: 'highpass' },
+        { frequency: 200, gain: -1, Q: 1.0, type: 'peaking' },
+        { frequency: 8000, gain: 0.5, Q: 0.7, type: 'highshelf' },
+      ],
+      compressor: { ...transparentComp, threshold: -8, ratio: 1.3, makeupGain: 0.5 },
+      limiter: { threshold: -1, release: 0.06 },
+      saturation: cleanSat,
+      stereoWidth: { width: 1.0 },
+      gain: 0,
+    },
+  },
+  {
+    id: 'mastering-loud',
+    name: 'Mastering — Loud & Competitive',
+    category: 'mastering',
+    description: 'Streaming-loud. Pushes into the limiter for maximum perceived loudness. For tracks that need to compete on playlists.',
+    stems: {},
+    master: {
+      eq: [
+        { frequency: 30, gain: -4, Q: 0.7, type: 'highpass' },
+        { frequency: 60, gain: 2, Q: 0.8, type: 'lowshelf' },
+        { frequency: 200, gain: -2, Q: 1.2, type: 'peaking' },
+        { frequency: 3500, gain: 2, Q: 0.8, type: 'peaking' },
+        { frequency: 10000, gain: 3, Q: 0.6, type: 'highshelf' },
+      ],
+      compressor: { ...punchyComp, threshold: -12, ratio: 3.5, attack: 0.003, makeupGain: 4 },
+      limiter: { threshold: -0.1, release: 0.02 },
+      saturation: warmTapeSat,
+      stereoWidth: { width: 1.2 },
+      gain: 3,
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // KANYE-ERA PRESETS
+  // ═══════════════════════════════════════════════════════════════
+  {
+    id: 'ye-soulful',
+    name: 'Soulful — Warm Samples',
+    category: 'genre',
+    description: 'College Dropout era. Chopped soul, warm vinyl grit, pitched vocals, everything through vintage analog warmth.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 100, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 400, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 800, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 3000, gain: 3, Q: 1.2, type: 'peaking' },
+          { frequency: 8000, gain: -3, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: { ...vocalRideComp, threshold: -20, ratio: 3, attack: 0.008 },
+        saturation: hotTubeSat,
+        gain: 1,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 60, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 400, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 2500, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: -3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -22, ratio: 4, attack: 0.003 },
+        saturation: hotTubeSat,
+        gain: 0,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 50, gain: 3, Q: 0.8, type: 'lowshelf' },
+          { frequency: 120, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 300, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 700, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 3000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...glueComp, threshold: -18, ratio: 3.5 },
+        saturation: hotTubeSat,
+        gain: -1,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 80, gain: -4, Q: 0.7, type: 'highpass' },
+          { frequency: 200, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 800, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 1500, gain: 1, Q: 1.0, type: 'peaking' },
+          { frequency: 6000, gain: -4, Q: 0.7, type: 'highshelf' },
+          { frequency: 12000, gain: -6, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -18, ratio: 2.5 },
+        saturation: hotTubeSat,
+        gain: -2,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: -3, Q: 0.7, type: 'highpass' },
+        { frequency: 200, gain: 2, Q: 0.7, type: 'lowshelf' },
+        { frequency: 3000, gain: 1, Q: 1.0, type: 'peaking' },
+        { frequency: 8000, gain: -3, Q: 0.6, type: 'highshelf' },
+      ],
+      compressor: { ...glueComp, threshold: -14, ratio: 2.5, makeupGain: 2 },
+      limiter: { threshold: -0.8, release: 0.05 },
+      saturation: hotTubeSat,
+      stereoWidth: { width: 1.05 },
+      gain: 0,
+    },
+  },
+  {
+    id: 'ye-anthemic',
+    name: 'Anthemic — Stadium Size',
+    category: 'genre',
+    description: 'Graduation era. Everything BIG. Wide synths, massive drums, vocal on top of the world. Arena energy.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 250, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 2500, gain: 5, Q: 1.2, type: 'peaking' },
+          { frequency: 5000, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: 4, Q: 0.6, type: 'highshelf' },
+          { frequency: 14000, gain: 3, Q: 0.4, type: 'highshelf' },
+        ],
+        compressor: { ...vocalRideComp, threshold: -22, ratio: 4, makeupGain: 5 },
+        saturation: warmTapeSat,
+        gain: 3,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 50, gain: 6, Q: 1.0, type: 'peaking' },
+          { frequency: 100, gain: 3, Q: 1.2, type: 'peaking' },
+          { frequency: 300, gain: -5, Q: 1.8, type: 'peaking' },
+          { frequency: 3500, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 4, Q: 0.7, type: 'highshelf' },
+          { frequency: 12000, gain: 3, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -20, ratio: 5, attack: 0.001, makeupGain: 5 },
+        saturation: warmTapeSat,
+        gain: 2,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 40, gain: 5, Q: 0.8, type: 'lowshelf' },
+          { frequency: 100, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 250, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -5, Q: 2.0, type: 'peaking' },
+          { frequency: 1500, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...punchyComp, threshold: -18, ratio: 5, attack: 0.003 },
+        saturation: warmTapeSat,
+        gain: 1,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 150, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 400, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 2000, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 5000, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 10000, gain: 4, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: { ...glueComp, threshold: -16, ratio: 3, makeupGain: 2 },
+        saturation: warmTapeSat,
+        gain: 0,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 25, gain: 3, Q: 0.7, type: 'lowshelf' },
+        { frequency: 300, gain: -2, Q: 1.2, type: 'peaking' },
+        { frequency: 3500, gain: 3, Q: 0.8, type: 'peaking' },
+        { frequency: 10000, gain: 4, Q: 0.5, type: 'highshelf' },
+      ],
+      compressor: { ...punchyComp, threshold: -12, ratio: 3, makeupGain: 3 },
+      limiter: { threshold: -0.3, release: 0.03 },
+      saturation: warmTapeSat,
+      stereoWidth: { width: 1.45 },
+      gain: 2,
+    },
+  },
+  {
+    id: 'ye-808s',
+    name: '808s — Cold & Emotional',
+    category: 'genre',
+    description: '808s & Heartbreak. Sparse, cold, massive sub, everything else stripped back. Emotional weight from emptiness.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 100, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 1800, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 4000, gain: 4, Q: 1.2, type: 'peaking' },
+          { frequency: 8000, gain: 2, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -18, ratio: 3, attack: 0.005 },
+        saturation: cleanSat,
+        gain: 3,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 40, gain: 4, Q: 0.8, type: 'lowshelf' },
+          { frequency: 200, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -4, Q: 2.0, type: 'peaking' },
+          { frequency: 5000, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 10000, gain: -2, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...slowSqueezeComp, threshold: -20, ratio: 2.5, attack: 0.01 },
+        saturation: cleanSat,
+        gain: -3,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 25, gain: 10, Q: 0.6, type: 'lowshelf' },
+          { frequency: 60, gain: 6, Q: 0.8, type: 'peaking' },
+          { frequency: 100, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: -6, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -10, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...crushComp, threshold: -14, ratio: 8, attack: 0.005 },
+        saturation: hotTubeSat,
+        gain: 5,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 200, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 500, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 3000, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 8000, gain: -3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: transparentComp,
+        saturation: cleanSat,
+        gain: -6,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 25, gain: 5, Q: 0.7, type: 'lowshelf' },
+        { frequency: 200, gain: -3, Q: 1.2, type: 'peaking' },
+        { frequency: 3000, gain: 1, Q: 1.0, type: 'peaking' },
+        { frequency: 10000, gain: -2, Q: 0.6, type: 'highshelf' },
+      ],
+      compressor: { ...glueComp, threshold: -14, ratio: 2.5, makeupGain: 2 },
+      limiter: { threshold: -0.5, release: 0.04 },
+      saturation: warmTapeSat,
+      stereoWidth: { width: 1.15 },
+      gain: 1,
+    },
+  },
+  {
+    id: 'ye-maximalist',
+    name: 'Maximalist — Dark Fantasy',
+    category: 'genre',
+    description: 'MBDTF era. Everything at 11. Dense layers, orchestral power, aggressive compression, cinematic scale.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -8, Q: 0.7, type: 'highpass' },
+          { frequency: 250, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 1200, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 3500, gain: 5, Q: 1.2, type: 'peaking' },
+          { frequency: 8000, gain: 4, Q: 0.7, type: 'highshelf' },
+          { frequency: 12000, gain: 3, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -22, ratio: 6, attack: 0.002, makeupGain: 6 },
+        saturation: hotTubeSat,
+        gain: 3,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 50, gain: 6, Q: 1.0, type: 'peaking' },
+          { frequency: 100, gain: 4, Q: 1.2, type: 'peaking' },
+          { frequency: 300, gain: -5, Q: 1.8, type: 'peaking' },
+          { frequency: 4000, gain: 6, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 4, Q: 0.7, type: 'highshelf' },
+          { frequency: 12000, gain: 3, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -20, ratio: 8, attack: 0.0005, makeupGain: 7 },
+        saturation: hotTubeSat,
+        gain: 3,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 40, gain: 5, Q: 0.8, type: 'lowshelf' },
+          { frequency: 100, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 250, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -3, Q: 2.0, type: 'peaking' },
+          { frequency: 2000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...punchyComp, threshold: -16, ratio: 6, makeupGain: 4 },
+        saturation: hotTubeSat,
+        gain: 2,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 100, gain: -4, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 1500, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 5000, gain: 4, Q: 0.8, type: 'peaking' },
+          { frequency: 10000, gain: 4, Q: 0.6, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -18, ratio: 4, makeupGain: 3 },
+        saturation: crunchSat,
+        gain: 1,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: 4, Q: 0.7, type: 'lowshelf' },
+        { frequency: 250, gain: -2, Q: 1.2, type: 'peaking' },
+        { frequency: 3000, gain: 3, Q: 0.8, type: 'peaking' },
+        { frequency: 10000, gain: 4, Q: 0.5, type: 'highshelf' },
+      ],
+      compressor: { ...crushComp, threshold: -10, ratio: 4, makeupGain: 5 },
+      limiter: { threshold: -0.2, release: 0.02 },
+      saturation: hotTubeSat,
+      stereoWidth: { width: 1.45 },
+      gain: 2,
+    },
+  },
+  {
+    id: 'ye-industrial',
+    name: 'Industrial — Raw Aggression',
+    category: 'genre',
+    description: 'Yeezus era. Intentionally harsh. Distorted everything, stripped production, confrontational and abrasive.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 120, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 500, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 2000, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 5000, gain: 6, Q: 1.2, type: 'peaking' },
+          { frequency: 10000, gain: 4, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -18, ratio: 10, attack: 0.0005, makeupGain: 8 },
+        saturation: destroySat,
+        gain: 3,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 50, gain: 5, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: -6, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -6, Q: 2.0, type: 'peaking' },
+          { frequency: 3000, gain: 7, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 6, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -16, ratio: 12, attack: 0.0003, makeupGain: 8 },
+        saturation: destroySat,
+        gain: 3,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 40, gain: 6, Q: 0.8, type: 'lowshelf' },
+          { frequency: 200, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 800, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 2000, gain: 3, Q: 0.8, type: 'peaking' },
+        ],
+        compressor: { ...crushComp, threshold: -14, ratio: 10, makeupGain: 6 },
+        saturation: crunchSat,
+        gain: 2,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 200, gain: -5, Q: 0.7, type: 'highpass' },
+          { frequency: 500, gain: -5, Q: 1.5, type: 'peaking' },
+          { frequency: 2000, gain: 6, Q: 1.2, type: 'peaking' },
+          { frequency: 6000, gain: 5, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...crushComp, threshold: -16, ratio: 8, makeupGain: 6 },
+        saturation: destroySat,
+        gain: 1,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: 3, Q: 0.7, type: 'lowshelf' },
+        { frequency: 300, gain: -4, Q: 1.5, type: 'peaking' },
+        { frequency: 4000, gain: 5, Q: 0.8, type: 'peaking' },
+        { frequency: 10000, gain: 5, Q: 0.5, type: 'highshelf' },
+      ],
+      compressor: { ...crushComp, threshold: -8, ratio: 6, makeupGain: 6 },
+      limiter: { threshold: -0.1, release: 0.01 },
+      saturation: crunchSat,
+      stereoWidth: { width: 1.1 },
+      gain: 3,
+    },
+  },
+  {
+    id: 'ye-gospel',
+    name: 'Gospel — Uplifting Power',
+    category: 'genre',
+    description: 'Donda/TLOP era. Choir energy, organ warmth, wide and powerful. Spiritual weight meets modern production.',
+    stems: {
+      vocals: {
+        eq: [
+          { frequency: 80, gain: -6, Q: 0.7, type: 'highpass' },
+          { frequency: 300, gain: -2, Q: 1.5, type: 'peaking' },
+          { frequency: 1000, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 3000, gain: 4, Q: 1.2, type: 'peaking' },
+          { frequency: 8000, gain: 3, Q: 0.7, type: 'highshelf' },
+          { frequency: 12000, gain: 2, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...vocalRideComp, threshold: -20, ratio: 3.5, attack: 0.005, makeupGain: 3 },
+        saturation: warmTapeSat,
+        gain: 2,
+        pan: 0,
+      },
+      drums: {
+        eq: [
+          { frequency: 60, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 200, gain: -3, Q: 1.5, type: 'peaking' },
+          { frequency: 400, gain: -4, Q: 2.0, type: 'peaking' },
+          { frequency: 3000, gain: 4, Q: 1.0, type: 'peaking' },
+          { frequency: 8000, gain: 3, Q: 0.7, type: 'highshelf' },
+        ],
+        compressor: { ...punchyComp, threshold: -20, ratio: 4, attack: 0.002 },
+        saturation: warmTapeSat,
+        gain: 0,
+        pan: 0,
+      },
+      bass: {
+        eq: [
+          { frequency: 50, gain: 4, Q: 0.8, type: 'lowshelf' },
+          { frequency: 120, gain: 2, Q: 1.0, type: 'peaking' },
+          { frequency: 250, gain: -4, Q: 1.5, type: 'peaking' },
+          { frequency: 500, gain: -3, Q: 2.0, type: 'peaking' },
+          { frequency: 2000, gain: -6, Q: 0.7, type: 'lowpass' },
+        ],
+        compressor: { ...glueComp, threshold: -18, ratio: 4, attack: 0.005 },
+        saturation: warmTapeSat,
+        gain: -1,
+        pan: 0,
+      },
+      instruments: {
+        eq: [
+          { frequency: 100, gain: -4, Q: 0.7, type: 'highpass' },
+          { frequency: 250, gain: 3, Q: 0.8, type: 'peaking' },
+          { frequency: 800, gain: 2, Q: 0.8, type: 'peaking' },
+          { frequency: 1500, gain: 3, Q: 1.0, type: 'peaking' },
+          { frequency: 5000, gain: 2, Q: 0.7, type: 'highshelf' },
+          { frequency: 10000, gain: 2, Q: 0.5, type: 'highshelf' },
+        ],
+        compressor: { ...glueComp, threshold: -16, ratio: 2.5, makeupGain: 2 },
+        saturation: warmTapeSat,
+        gain: 0,
+        pan: 0,
+      },
+    },
+    master: {
+      eq: [
+        { frequency: 30, gain: 2, Q: 0.7, type: 'lowshelf' },
+        { frequency: 300, gain: -2, Q: 1.2, type: 'peaking' },
+        { frequency: 2500, gain: 3, Q: 0.8, type: 'peaking' },
+        { frequency: 8000, gain: 3, Q: 0.6, type: 'highshelf' },
+        { frequency: 14000, gain: 2, Q: 0.4, type: 'highshelf' },
+      ],
+      compressor: { ...glueComp, threshold: -12, ratio: 2.5, makeupGain: 2 },
+      limiter: { threshold: -0.5, release: 0.04 },
+      saturation: warmTapeSat,
+      stereoWidth: { width: 1.35 },
+      gain: 1,
+    },
+  },
+];
+
+export function getPresetsByCategory(category: Preset['category']): Preset[] {
+  return presets.filter((p) => p.category === category);
+}
+
+export function getPresetById(id: string): Preset | undefined {
+  return presets.find((p) => p.id === id);
+}
