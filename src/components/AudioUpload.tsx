@@ -183,7 +183,7 @@ function DropZone({
     >
       <input
         type="file"
-        accept="audio/*"
+        accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg,.aac"
         multiple={multiple}
         onChange={onFileInput}
         className="absolute inset-0 opacity-0 cursor-pointer"
