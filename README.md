@@ -55,17 +55,37 @@ A fully open-source, browser-based mixing and mastering studio built with Next.j
 - Keyboard shortcuts help overlay
 - Modern dark theme
 
+## Live demo
+
+**https://levizigza.github.io/Mixing-Mastering/**
+
+Deployed automatically to GitHub Pages on every push to `main`.
+
 ## Getting Started
 
 ```bash
 # Install dependencies
 npm install
 
-# Start dev server
+# Start dev server (no basePath)
 npm run dev
 
 # Open http://localhost:3000
 ```
+
+### Build for GitHub Pages (static export)
+
+```bash
+# Windows PowerShell
+$env:GITHUB_PAGES='true'; npm run build
+
+# macOS / Linux
+GITHUB_PAGES=true npm run build
+```
+
+Output lands in `out/` and is published by `.github/workflows/deploy-pages.yml`.
+
+In the repo **Settings → Pages**, set Source to **GitHub Actions**.
 
 ## Tech Stack
 - **Next.js 14** — App router

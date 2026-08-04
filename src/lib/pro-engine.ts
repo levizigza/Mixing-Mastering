@@ -15,6 +15,7 @@ import {
   defaultBusIdForStem,
 } from '@/types/audio';
 import { ALL_BUS_IDS } from './defaults';
+import { withBasePath } from './base-path';
 
 export interface ProMeterData extends MeterData {
   momentaryLUFS: number;
@@ -916,19 +917,24 @@ export class ProAudioEngine {
 
   async loadWorklets(): Promise<boolean> {
     try {
-      await this.context.audioWorklet.addModule('/worklets/compressor-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/limiter-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/saturation-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/multiband-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/midside-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/metering-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/linear-phase-eq-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/oversampled-saturation-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/dynamic-eq-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/sidechain-compressor-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/transient-designer-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/gate-expander-processor.js');
-      await this.context.audioWorklet.addModule('/worklets/stereo-imager-processor.js');
+      const modules = [
+        'compressor-processor.js',
+        'limiter-processor.js',
+        'saturation-processor.js',
+        'multiband-processor.js',
+        'midside-processor.js',
+        'metering-processor.js',
+        'linear-phase-eq-processor.js',
+        'oversampled-saturation-processor.js',
+        'dynamic-eq-processor.js',
+        'sidechain-compressor-processor.js',
+        'transient-designer-processor.js',
+        'gate-expander-processor.js',
+        'stereo-imager-processor.js',
+      ];
+      await Promise.all(
+        modules.map((m) => this.context.audioWorklet.addModule(withBasePath(`/worklets/${m}`)))
+      );
       this.workletsReady = true;
       await this.masterChannel.initWorklets();
       return true;
@@ -1180,7 +1186,7 @@ export class ProAudioEngine {
     // AudioWorklets DO work in OfflineAudioContext since Chrome 66 / Firefox 76.
     let workletsOk = false;
     try {
-      const base = '/worklets/';
+      const base = withBasePath('/worklets/');
       const modules = [
         'compressor-processor.js', 'limiter-processor.js', 'saturation-processor.js',
         'multiband-processor.js', 'midside-processor.js', 'metering-processor.js',
