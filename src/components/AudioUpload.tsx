@@ -96,6 +96,12 @@ const STATION_ICONS: Record<StationId, React.ReactNode> = {
   delivery: <Package size={14} />,
 };
 
+function isAudioFile(f: File): boolean {
+  if (f.type && f.type.startsWith('audio/')) return true;
+  // Windows / some browsers leave MIME empty on MP3 drops
+  return /\.(mp3|wav|wave|flac|m4a|aac|ogg|opus|aiff?|wma)$/i.test(f.name);
+}
+
 function ProgressBlock({
   color,
   icon,
@@ -239,7 +245,7 @@ export default function AudioUpload({
 }: AudioUploadProps) {
   const [dragOver, setDragOver] = useState(false);
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
-  const [mode, setMode] = useState<UploadMode>('automaster');
+  const [mode, setMode] = useState<UploadMode>('assembly');
   const [levelMode, setLevelMode] = useState<LevelingMode>(() => {
     if (typeof window === 'undefined') return 'mix';
     try {
@@ -287,7 +293,7 @@ export default function AudioUpload({
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('audio/'));
+      const files = Array.from(e.dataTransfer.files).filter(isAudioFile);
       if (files.length === 0) return;
 
       if (mode === 'automaster' && onQuickMaster) onQuickMaster(files[0]);
@@ -305,7 +311,7 @@ export default function AudioUpload({
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files || []);
+      const files = Array.from(e.target.files || []).filter(isAudioFile);
       if (files.length === 0) return;
 
       if (mode === 'automaster' && onQuickMaster) onQuickMaster(files[0]);
@@ -510,7 +516,7 @@ export default function AudioUpload({
                     color={theme.color}
                     icon={<Factory size={20} />}
                     title="Drop mix — full auto pipeline"
-                    subtitle="Analyze → repair → level → mix → master"
+                    subtitle="Analyze → repair → correct → level → master"
                   />
                   {isAssemblyLine && onCancelAssemblyLine && (
                     <button

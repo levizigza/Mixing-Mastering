@@ -1,30 +1,26 @@
-/** One-button Assembly Line: analyze → repair → level → split → mix → master. */
+/** Diagnosis-weighted stereo cleanup before mastering (no destructive stem remaster). */
 
 import { SongSection } from '@/types/audio';
-import { analyzePipeline, PipelineDiagnosis } from '@/lib/pipeline-analyze';
-import { runAudioRepair } from '@/lib/audio-repair';
+import { analyzePipeline, PipelineDiagnosis, PipelineIssue } from '@/lib/pipeline-analyze';
+import { runAudioRepair, RepairSettings } from '@/lib/audio-repair';
 import { autoLevelTrack } from '@/lib/audio-leveler';
-import { separateStems } from '@/lib/stem-separator';
-import { autoMixAndMaster, analyzeAndMasterTrack } from '@/lib/auto-mix';
+import { analyzeAndMasterTrack } from '@/lib/auto-mix';
 import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
-import { bounceOfflineMix, stemsFromSeparated } from '@/lib/offline-mix-bounce';
 
 export type AssemblyStageId =
   | 'analyze'
   | 'repair'
+  | 'fix'
   | 'level'
-  | 'split'
-  | 'mix'
   | 'master'
   | 'done';
 
 export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   analyze: 'Analyze',
   repair: 'Repair',
+  fix: 'Correct',
   level: 'Level',
-  split: 'Separate',
-  mix: 'Mix',
   master: 'Master',
   done: 'Done',
 };
@@ -35,7 +31,7 @@ export interface AssemblyStageNote {
   notes: string[];
 }
 
-/** Lightweight report for React state — no AudioBuffers (those freeze/OOM the tab). */
+/** Lightweight report for React state — no AudioBuffers. */
 export interface AssemblyLineReportData {
   sections: SongSection[];
   diagnosis: PipelineDiagnosis;
@@ -84,19 +80,100 @@ function mapProgress(
   };
 }
 
+function hasIssue(issues: PipelineIssue[], id: string, min: 'low' | 'medium' | 'high' = 'low') {
+  const order = { low: 1, medium: 2, high: 3 };
+  const hit = issues.find((i) => i.id === id);
+  if (!hit) return false;
+  return order[hit.severity] >= order[min];
+}
+
+function repairFromDiagnosis(d: PipelineDiagnosis): RepairSettings {
+  const s = { ...d.repairSettings };
+  // Meaningful cleanup — gate always helps; spectral only on shorter clips (handled in runAudioRepair)
+  if (hasIssue(d.issues, 'noiseFloor', 'low')) s.denoise = Math.max(s.denoise, 48);
+  if (hasIssue(d.issues, 'clipping', 'medium')) s.declip = Math.max(s.declip, 60);
+  if (hasIssue(d.issues, 'clipping', 'high')) s.declip = 75;
+  s.declick = Math.max(s.declick, 40);
+  s.dehum = Math.max(s.dehum, 35);
+  if (hasIssue(d.issues, 'mud', 'medium')) {
+    s.deplosive = Math.max(s.deplosive, 45);
+    s.dereverb = Math.max(s.dereverb, 28);
+  }
+  return s;
+}
+
+/** Offline biquad corrective EQ driven by diagnosis flags. */
+async function applyCorrectiveEq(
+  buffer: AudioBuffer,
+  diagnosis: PipelineDiagnosis,
+  onProgress?: (p: number, m: string) => void
+): Promise<{ buffer: AudioBuffer; notes: string[] }> {
+  const notes: string[] = [];
+  const filters: { type: BiquadFilterType; frequency: number; Q: number; gain: number }[] = [];
+
+  if (hasIssue(diagnosis.issues, 'mud', 'low')) {
+    const gain = hasIssue(diagnosis.issues, 'mud', 'high') ? -3.5 : -2.2;
+    filters.push({ type: 'peaking', frequency: 280, Q: 1.1, gain });
+    filters.push({ type: 'highpass', frequency: 35, Q: 0.7, gain: 0 });
+    notes.push(`Cut mud ~280 Hz (${gain} dB)`);
+  }
+  if (hasIssue(diagnosis.issues, 'harshHf', 'low')) {
+    const gain = hasIssue(diagnosis.issues, 'harshHf', 'high') ? -3 : -1.8;
+    filters.push({ type: 'peaking', frequency: 4500, Q: 1.4, gain });
+    notes.push(`Tame harshness ~4.5 kHz (${gain} dB)`);
+  }
+  if (hasIssue(diagnosis.issues, 'lowDynamics', 'medium')) {
+    // Slight air restore when already crushed
+    filters.push({ type: 'highshelf', frequency: 10000, Q: 0.7, gain: 1.2 });
+    notes.push('Add slight air shelf for crushed dynamics');
+  }
+  if (diagnosis.estimatedLufs < -20) {
+    filters.push({ type: 'lowshelf', frequency: 120, Q: 0.7, gain: 1.0 });
+    notes.push('Gentle low shelf for quiet program');
+  }
+
+  if (filters.length === 0) {
+    onProgress?.(100, 'No corrective EQ needed');
+    notes.push('Tonal balance OK — no corrective EQ.');
+    return { buffer, notes };
+  }
+
+  onProgress?.(20, 'Applying corrective EQ...');
+  await yieldToUI();
+
+  const ctx = new OfflineAudioContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  let node: AudioNode = src;
+  for (const f of filters) {
+    const b = ctx.createBiquadFilter();
+    b.type = f.type;
+    b.frequency.value = f.frequency;
+    b.Q.value = f.Q;
+    b.gain.value = f.gain;
+    node.connect(b);
+    node = b;
+  }
+  node.connect(ctx.destination);
+  src.start(0);
+  onProgress?.(70, 'Rendering corrective EQ...');
+  const out = await ctx.startRendering();
+  onProgress?.(100, 'Corrective EQ done');
+  return { buffer: out, notes };
+}
+
 export async function runAssemblyLine(
   buffer: AudioBuffer,
   options: AssemblyLineOptions = {}
 ): Promise<AssemblyLineResult> {
-  const { onProgress, signal, trackName = 'Track', targetLUFS = -14 } = options;
+  const { onProgress, signal, targetLUFS = -14 } = options;
   const stageNotes: AssemblyStageNote[] = [];
-  const longTrack = buffer.duration > 210; // ~3.5 min — skip heavy remaster split
 
   // ── 1. Analyze ───────────────────────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(2, 'analyze', 'Analyzing structure and issues...');
+  onProgress?.(3, 'analyze', 'Analyzing structure and issues...');
   await yieldToUI();
-  const { diagnosis, sections } = analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 2, 10));
+  const { diagnosis, sections } = analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 12));
   await yieldToUI();
   stageNotes.push({
     stage: 'analyze',
@@ -108,19 +185,15 @@ export async function runAssemblyLine(
     ],
   });
 
-  // ── 2. Repair (light settings — avoid UI-freezing spectral on long files) ─
+  // ── 2. Repair on the stereo mix ──────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(12, 'repair', 'Cleanup bay...');
+  onProgress?.(16, 'repair', 'Cleanup bay...');
   await yieldToUI();
-  const repairSettings = {
-    ...diagnosis.repairSettings,
-    denoise: Math.min(diagnosis.repairSettings.denoise, 18),
-    dereverb: Math.min(diagnosis.repairSettings.dereverb, 15),
-  };
+  const repairSettings = repairFromDiagnosis(diagnosis);
   const repaired = await runAudioRepair(
     buffer,
     repairSettings,
-    mapProgress(onProgress, 'repair', 12, 14)
+    mapProgress(onProgress, 'repair', 16, 18)
   );
   await yieldToUI();
   stageNotes.push({
@@ -129,120 +202,93 @@ export async function runAssemblyLine(
     notes: repaired.notes.length ? repaired.notes : ['Light cleanup pass.'],
   });
 
-  // ── 3. Level ─────────────────────────────────────────────────
+  // ── 3. Corrective EQ from diagnosis ──────────────────────────
   throwIfAborted(signal);
-  onProgress?.(28, 'level', 'Gain staging...');
+  onProgress?.(36, 'fix', 'Fixing problem bands...');
   await yieldToUI();
-  const leveled = await autoLevelTrack(
+  const corrected = await applyCorrectiveEq(
     repaired.buffer,
-    { mode: 'mix' },
-    mapProgress(onProgress, 'level', 28, 10)
+    diagnosis,
+    mapProgress(onProgress, 'fix', 36, 14)
+  );
+  await yieldToUI();
+  stageNotes.push({
+    stage: 'fix',
+    label: ASSEMBLY_STAGE_LABELS.fix,
+    notes: corrected.notes,
+  });
+
+  // ── 4. Level ─────────────────────────────────────────────────
+  throwIfAborted(signal);
+  onProgress?.(52, 'level', 'Gain staging...');
+  await yieldToUI();
+  // Quiet tracks → loudness mode; hot tracks → mix headroom
+  const levelMode =
+    hasIssue(diagnosis.issues, 'loudness', 'medium') && diagnosis.estimatedLufs > -11
+      ? 'mix'
+      : diagnosis.estimatedLufs < -20
+      ? 'loudness'
+      : 'mix';
+  const leveled = await autoLevelTrack(
+    corrected.buffer,
+    { mode: levelMode },
+    mapProgress(onProgress, 'level', 52, 12)
   );
   await yieldToUI();
   stageNotes.push({
     stage: 'level',
     label: ASSEMBLY_STAGE_LABELS.level,
-    notes: leveled.recommendations.length
-      ? leveled.recommendations
-      : [`Leveled for mix headroom (${leveled.gainAppliedDb.toFixed(1)} dB)`],
+    notes: [
+      `Mode: ${levelMode} · ${leveled.gainAppliedDb >= 0 ? '+' : ''}${leveled.gainAppliedDb.toFixed(1)} dB`,
+      ...leveled.recommendations.slice(0, 4),
+    ],
   });
 
-  let masterInput = leveled.buffer;
-
-  // ── 4–5. Separate + mix (skip on very long tracks to avoid tab crash) ─
-  if (!longTrack) {
-    throwIfAborted(signal);
-    onProgress?.(40, 'split', 'Heuristic stem split...');
-    await yieldToUI();
-    const separated = await separateStems(
-      leveled.buffer,
-      mapProgress(onProgress, 'split', 40, 12)
-    );
-    throwIfAborted(signal);
-    await yieldToUI();
-    stageNotes.push({
-      stage: 'split',
-      label: ASSEMBLY_STAGE_LABELS.split,
-      notes: ['Split into vocals / drums / bass / instruments (heuristic DSP).'],
-    });
-
-    throwIfAborted(signal);
-    onProgress?.(54, 'mix', 'Auto-mix balance...');
-    await yieldToUI();
-    const heuristicStems = stemsFromSeparated(separated, trackName);
-    const mixResult = autoMixAndMaster(heuristicStems, mapProgress(onProgress, 'mix', 54, 8));
-    for (const stem of heuristicStems) {
-      const settings = mixResult.stemSettings[stem.id];
-      if (settings) stem.processing = settings;
-    }
-
-    throwIfAborted(signal);
-    onProgress?.(64, 'mix', 'Bouncing mixed stereo...');
-    await yieldToUI();
-    try {
-      masterInput = await bounceOfflineMix(
-        heuristicStems,
-        mixResult.stemSettings,
-        mapProgress(onProgress, 'mix', 64, 12)
-      );
-      stageNotes.push({
-        stage: 'mix',
-        label: ASSEMBLY_STAGE_LABELS.mix,
-        notes: mixResult.analysis.map(
-          (a) =>
-            `${a.name}: peak ${a.peakDb.toFixed(1)} dB · RMS ${a.rmsDb.toFixed(1)} dB · crest ${a.crestFactor.toFixed(1)}`
-        ),
-      });
-    } catch (mixErr) {
-      console.warn('Mix bounce failed, mastering leveled stereo instead', mixErr);
-      masterInput = leveled.buffer;
-      stageNotes.push({
-        stage: 'mix',
-        label: ASSEMBLY_STAGE_LABELS.mix,
-        notes: ['Mix bounce failed — continuing with leveled stereo.'],
-      });
-    }
-  } else {
-    onProgress?.(50, 'split', 'Long track — skipping stem remaster');
-    await yieldToUI();
-    stageNotes.push({
-      stage: 'split',
-      label: ASSEMBLY_STAGE_LABELS.split,
-      notes: ['Skipped heuristic split (track > 3.5 min) to keep the browser responsive.'],
-    });
-    stageNotes.push({
-      stage: 'mix',
-      label: ASSEMBLY_STAGE_LABELS.mix,
-      notes: ['Using leveled stereo into mastering.'],
-    });
-  }
-
-  // ── 6. Master ────────────────────────────────────────────────
+  // ── 5. Master (stereo — no heuristic stem remaster) ──────────
   throwIfAborted(signal);
-  onProgress?.(78, 'master', 'Analyzing for master...');
+  onProgress?.(66, 'master', 'Analyzing for master...');
   await yieldToUI();
-  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 78, 4));
+  const masterInput = leveled.buffer;
+  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 66, 6));
   await yieldToUI();
 
-  onProgress?.(84, 'master', 'Sonic character...');
+  onProgress?.(74, 'master', 'Sonic character...');
   await yieldToUI();
   const character = detectSonicCharacter(masterInput);
   const profile = getProcessingProfile(character.character, character.traits);
 
   let masterTarget = profile.masteringApproach.targetLUFS ?? targetLUFS;
-  if (diagnosis.issues.some((i) => i.id === 'loudness' && i.severity !== 'low')) {
-    masterTarget = Math.min(masterTarget, -12);
+  if (hasIssue(diagnosis.issues, 'loudness', 'medium') && diagnosis.estimatedLufs > -11) {
+    // Already loud — aim softer / less aggressive
+    masterTarget = Math.min(masterTarget, -13);
+  }
+  if (diagnosis.estimatedLufs < -18) {
+    masterTarget = Math.max(masterTarget, -14);
+  }
+
+  const approach = { ...profile.masteringApproach, targetLUFS: masterTarget };
+  if (hasIssue(diagnosis.issues, 'lowDynamics', 'high')) {
+    approach.multibandAggression *= 0.45;
+    approach.busCompGlue *= 0.4;
+  }
+  if (hasIssue(diagnosis.issues, 'harshHf', 'medium')) {
+    approach.airBoost = Math.min(approach.airBoost, 0.4);
+    approach.harmonicExcitement *= 0.6;
+  }
+  if (hasIssue(diagnosis.issues, 'mud', 'medium')) {
+    approach.lowEndBoost = Math.min(approach.lowEndBoost, 0.25);
+    approach.analogWarmth *= 0.7;
   }
 
   throwIfAborted(signal);
-  onProgress?.(88, 'master', 'Mastering chain...');
+  onProgress?.(80, 'master', 'Mastering chain...');
   await yieldToUI();
   const masteringStats = await applyMasteringChain(
     masterInput,
     trackAnalysis.analysis,
     masterTarget,
-    mapProgress(onProgress, 'master', 88, 10),
-    { ...profile.masteringApproach, targetLUFS: masterTarget }
+    mapProgress(onProgress, 'master', 80, 18),
+    approach
   );
   await yieldToUI();
 
@@ -251,8 +297,8 @@ export async function runAssemblyLine(
     label: ASSEMBLY_STAGE_LABELS.master,
     notes: [
       `Character: ${character.character} (${Math.round(character.confidence * 100)}%)`,
-      `Final LUFS: ${masteringStats.finalLUFS.toFixed(1)} · True peak: ${masteringStats.truePeak.toFixed(1)} dBTP`,
-      ...trackAnalysis.recommendations.map((r) => r.description),
+      `Target ${masterTarget} LUFS → final ${masteringStats.finalLUFS.toFixed(1)} · TP ${masteringStats.truePeak.toFixed(1)} dBTP`,
+      ...trackAnalysis.recommendations.map((r) => r.description).slice(0, 5),
     ],
   });
 
@@ -260,23 +306,24 @@ export async function runAssemblyLine(
   stageNotes.push({
     stage: 'done',
     label: ASSEMBLY_STAGE_LABELS.done,
-    notes: ['Original + Final ready for A/B. Sections mapped on timeline.'],
+    notes: [
+      'Stereo pipeline: analyze → repair → correct → level → master.',
+      'Original muted · Final unmuted — use Swap A/B to compare.',
+    ],
   });
-
-  const report: AssemblyLineReportData = {
-    sections,
-    diagnosis,
-    stageNotes,
-    trackAnalysisNotes: trackAnalysis.recommendations.map((r) => r.description),
-    finalLUFS: masteringStats.finalLUFS,
-    truePeak: masteringStats.truePeak,
-    bpm: diagnosis.bpm,
-    sectionCount: sections.length,
-  };
 
   return {
     originalBuffer: buffer,
     finalBuffer: masteringStats.buffer,
-    report,
+    report: {
+      sections,
+      diagnosis,
+      stageNotes,
+      trackAnalysisNotes: trackAnalysis.recommendations.map((r) => r.description),
+      finalLUFS: masteringStats.finalLUFS,
+      truePeak: masteringStats.truePeak,
+      bpm: diagnosis.bpm,
+      sectionCount: sections.length,
+    },
   };
 }

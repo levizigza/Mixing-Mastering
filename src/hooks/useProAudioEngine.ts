@@ -2089,16 +2089,71 @@ export function useProAudioEngine() {
       setAssemblyProgress(100);
       setAssemblyMessage('Assembly line complete!');
       setAssemblyStage(ASSEMBLY_STAGE_LABELS.done);
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 800));
     } catch (err: unknown) {
       const name = err && typeof err === 'object' && 'name' in err ? (err as { name: string }).name : '';
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Unknown error';
       if (name === 'AbortError') {
         setAssemblyMessage('Cancelled.');
       } else {
         console.error('Assembly line failed:', err);
-        setAssemblyMessage('Failed — check the file and try again.');
+        setAssemblyMessage(`Failed: ${message}`);
       }
-      await new Promise((r) => setTimeout(r, 1200));
+      // Keep failure visible in the report panel
+      setAssemblyResult((prev) =>
+        prev ?? {
+          sections: [],
+          diagnosis: {
+            bpm: 0,
+            duration: 0,
+            peakDb: -Infinity,
+            rmsDb: -Infinity,
+            estimatedLufs: -Infinity,
+            crestFactor: 0,
+            stereoImbalanceDb: 0,
+            mudRatio: 0,
+            harshRatio: 0,
+            issues: [],
+            sectionFlags: [],
+            beat: {
+              bpm: 0,
+              confidence: 0,
+              kickCount: 0,
+              snareCount: 0,
+              hatCount: 0,
+              totalHits: 0,
+              averageVelocity: 0,
+              grooveTightness: 0,
+            },
+            repairSettings: {
+              denoise: 0,
+              declick: 0,
+              dehum: 0,
+              humFreq: 60,
+              deplosive: 0,
+              declip: 0,
+              dereverb: 0,
+            },
+            notes: [name === 'AbortError' ? 'Cancelled.' : message],
+          },
+          stageNotes: [
+            {
+              stage: 'done',
+              label: 'Done',
+              notes: [name === 'AbortError' ? 'Cancelled by user.' : `Failed: ${message}`],
+            },
+          ],
+          trackAnalysisNotes: [],
+          finalLUFS: 0,
+          truePeak: 0,
+          bpm: 0,
+          sectionCount: 0,
+        }
+      );
+      await new Promise((r) => setTimeout(r, 2500));
     } finally {
       if (assemblyProgressFlushRef.current != null) {
         clearTimeout(assemblyProgressFlushRef.current);

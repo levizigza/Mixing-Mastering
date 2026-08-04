@@ -203,7 +203,7 @@ export default function StudioPage() {
   const dragIndexRef = useRef<number | null>(null);
 
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [activeStation, setActiveStation] = useState<StationId>('automaster');
+  const [activeStation, setActiveStation] = useState<StationId>('assembly');
   const activeTheme = STATION_THEMES[activeStation];
 
   // Keyboard shortcuts

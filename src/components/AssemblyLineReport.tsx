@@ -18,9 +18,8 @@ interface AssemblyLineReportProps {
 const STAGE_ORDER: AssemblyStageId[] = [
   'analyze',
   'repair',
+  'fix',
   'level',
-  'split',
-  'mix',
   'master',
   'done',
 ];
