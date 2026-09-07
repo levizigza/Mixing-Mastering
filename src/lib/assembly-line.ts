@@ -14,6 +14,7 @@ export type AssemblyStageId =
   | 'fix'
   | 'level'
   | 'master'
+  | 'deliver'
   | 'done';
 
 export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
@@ -22,6 +23,7 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   fix: 'Correct',
   level: 'Level',
   master: 'Master',
+  deliver: 'Deliver',
   done: 'Done',
 };
 
@@ -302,12 +304,20 @@ export async function runAssemblyLine(
     ],
   });
 
+  onProgress?.(98, 'deliver', 'Preparing download...');
+  await yieldToUI();
+
   onProgress?.(100, 'done', 'Assembly line complete');
+  stageNotes.push({
+    stage: 'deliver',
+    label: ASSEMBLY_STAGE_LABELS.deliver,
+    notes: ['Final master ready for download and playback.'],
+  });
   stageNotes.push({
     stage: 'done',
     label: ASSEMBLY_STAGE_LABELS.done,
     notes: [
-      'Stereo pipeline: analyze → repair → correct → level → master.',
+      'Full auto: analyze → repair → correct → level → master → deliver.',
       'Original muted · Final unmuted — use Swap A/B to compare.',
     ],
   });

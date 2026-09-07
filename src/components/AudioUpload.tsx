@@ -9,7 +9,6 @@ import {
   Guitar,
   Waves,
   Wand2,
-  Sparkles,
   SlidersHorizontal,
   Gauge,
   Volume2,
@@ -98,7 +97,6 @@ const STATION_ICONS: Record<StationId, React.ReactNode> = {
 
 function isAudioFile(f: File): boolean {
   if (f.type && f.type.startsWith('audio/')) return true;
-  // Windows / some browsers leave MIME empty on MP3 drops
   return /\.(mp3|wav|wave|flac|m4a|aac|ogg|opus|aiff?|wma)$/i.test(f.name);
 }
 
@@ -244,8 +242,10 @@ export default function AudioUpload({
   assemblyStage,
 }: AudioUploadProps) {
   const [dragOver, setDragOver] = useState(false);
+  const [assemblyDragOver, setAssemblyDragOver] = useState(false);
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
+  const [showManualStations, setShowManualStations] = useState(false);
   const [levelMode, setLevelMode] = useState<LevelingMode>(() => {
     if (typeof window === 'undefined') return 'mix';
     try {
@@ -270,6 +270,7 @@ export default function AudioUpload({
   });
 
   const theme = STATION_THEMES[mode];
+  const assemblyTheme = STATION_THEMES.assembly;
 
   useEffect(() => {
     onStationChange?.(mode);
@@ -287,7 +288,36 @@ export default function AudioUpload({
   const selectStation = (id: StationId) => {
     setMode(id);
     setDragOver(false);
+    if (id !== 'assembly') setShowManualStations(true);
   };
+
+  const runAssemblyDrop = useCallback(
+    (files: File[]) => {
+      if (!onAssemblyLine || files.length === 0) return;
+      setMode('assembly');
+      onAssemblyLine(files[0]);
+    },
+    [onAssemblyLine]
+  );
+
+  const handleAssemblyDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setAssemblyDragOver(false);
+      const files = Array.from(e.dataTransfer.files).filter(isAudioFile);
+      runAssemblyDrop(files);
+    },
+    [runAssemblyDrop]
+  );
+
+  const handleAssemblyFileInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []).filter(isAudioFile);
+      runAssemblyDrop(files);
+      e.target.value = '';
+    },
+    [runAssemblyDrop]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -328,9 +358,8 @@ export default function AudioUpload({
     [mode, selectedType, levelMode, autotuneIntensity, onFilesSelected, onQuickMaster, onAssemblyLine, onAutoLevel, onBeatStation, onAutotune, onVocalFix, onRepair]
   );
 
-  const busy =
+  const manualBusy =
     (mode === 'automaster' && isQuickMastering) ||
-    (mode === 'assembly' && isAssemblyLine) ||
     (mode === 'automix' && isAutoMixing) ||
     (mode === 'autolevel' && isAutoLeveling) ||
     (mode === 'beat' && isBeatStation) ||
@@ -340,417 +369,459 @@ export default function AudioUpload({
 
   return (
     <div className="space-y-3">
-      {/* Rack header */}
-      <div className="studio-rack px-3 py-2.5">
-        <span className="studio-screw top-1.5 left-1.5" />
-        <span className="studio-screw top-1.5 right-1.5" />
-        <span className="studio-screw bottom-1.5 left-1.5" />
-        <span className="studio-screw bottom-1.5 right-1.5" />
-        <div className="flex items-center justify-between px-1">
-          <div>
-            <p className="font-display text-[10px] tracking-[0.2em] text-studio-accent">SIGNAL PATH</p>
-            <p className="text-[9px] text-studio-muted font-mono mt-0.5">Select processing bay</p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="studio-led studio-led-on text-emerald-400" style={{ background: '#34d399', color: '#34d399' }} />
-            <span className="text-[8px] font-mono text-emerald-400/80 tracking-wider">READY</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Station modules — each with unique color stripe */}
-      <div className="grid grid-cols-2 gap-1.5">
-        {STATION_ORDER.map((id) => {
-          const s = STATION_THEMES[id];
-          const active = mode === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => selectStation(id)}
-              className={cn('station-module px-2.5 py-2.5', active && 'station-module-active')}
-              style={
-                {
-                  '--station-color': s.color,
-                  '--station-glow': s.glow,
-                  borderColor: active ? s.color : 'rgba(44,44,54,0.9)',
-                  background: active
-                    ? `linear-gradient(135deg, ${s.glow}, #121218 55%)`
-                    : undefined,
-                } as React.CSSProperties
-              }
-            >
-              <span className="station-stripe" />
-              <div className="pl-2 flex flex-col gap-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span style={{ color: s.color }}>{STATION_ICONS[id]}</span>
-                  <span
-                    className="font-display text-[9px] tracking-[0.12em] truncate"
-                    style={{ color: active ? s.color : '#9ca3af' }}
-                  >
-                    {s.short}
-                  </span>
-                  {active && (
-                    <span
-                      className="ml-auto studio-led studio-led-on shrink-0"
-                      style={{ background: s.color, color: s.color }}
-                    />
-                  )}
-                </div>
-                <p className="text-[8px] text-studio-muted leading-tight truncate text-left pl-0.5">
-                  {s.title}
-                </p>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Active station bay */}
+      {/* ── HERO: Full auto assembly line (always visible) ───────── */}
       <div
         className="station-bay"
         style={
           {
-            '--station-color': theme.color,
-            '--station-glow': theme.glow,
+            '--station-color': assemblyTheme.color,
+            '--station-glow': assemblyTheme.glow,
           } as React.CSSProperties
         }
       >
         <div className="station-bay-header">
-          <span className="studio-led" style={{ background: theme.color, color: theme.color }} />
+          <span
+            className="studio-led studio-led-on"
+            style={{ background: assemblyTheme.color, color: assemblyTheme.color }}
+          />
           <div className="min-w-0 flex-1">
-            <p className="font-display text-[11px] tracking-[0.14em]" style={{ color: theme.color }}>
-              {theme.title.toUpperCase()}
+            <p className="font-display text-[11px] tracking-[0.14em]" style={{ color: assemblyTheme.color }}>
+              FULL AUTO ASSEMBLY LINE
             </p>
-            <p className="text-[9px] text-studio-muted font-mono truncate">{theme.subtitle}</p>
+            <p className="text-[9px] text-studio-muted font-mono truncate">
+              Drop once → analyze → repair → correct → level → master → download
+            </p>
           </div>
           <span
             className="text-[8px] font-mono px-1.5 py-0.5 rounded border shrink-0"
             style={{
-              color: theme.color,
-              borderColor: `${theme.color}55`,
-              background: `${theme.color}18`,
+              color: assemblyTheme.color,
+              borderColor: `${assemblyTheme.color}55`,
+              background: `${assemblyTheme.color}18`,
             }}
           >
-            CH {STATION_ORDER.indexOf(mode) + 1}
+            1-CLICK
           </span>
         </div>
 
         <div className="p-3 space-y-3">
-          {busy ? (
+          {isAssemblyLine ? (
             <>
-            <ProgressBlock
-              color={theme.color}
-              icon={STATION_ICONS[mode]}
-              label={
-                mode === 'assembly'
-                  ? assemblyStage || 'Assembly Line'
-                  : mode === 'automaster'
-                  ? 'Mastering'
-                  : mode === 'automix'
-                  ? 'Mixing'
-                  : mode === 'autolevel'
-                  ? 'Levelling'
-                  : mode === 'beat'
-                  ? 'Beat Lab'
-                  : mode === 'autotune'
-                  ? 'Auto-Tune'
-                  : mode === 'repair'
-                  ? 'Repair'
-                  : 'Vocal Fix'
-              }
-              progress={
-                mode === 'assembly'
-                  ? assemblyProgress
-                  : mode === 'automaster'
-                  ? quickMasterProgress
-                  : mode === 'automix'
-                  ? autoMixProgress
-                  : mode === 'autolevel'
-                  ? autoLevelProgress
-                  : mode === 'beat'
-                  ? beatStationProgress
-                  : mode === 'autotune'
-                  ? autotuneProgress
-                  : mode === 'repair'
-                  ? repairProgress
-                  : vocalFixProgress
-              }
-              message={
-                mode === 'assembly'
-                  ? assemblyMessage
-                  : mode === 'automaster'
-                  ? quickMasterMessage
-                  : mode === 'automix'
-                  ? autoMixMessage
-                  : mode === 'autolevel'
-                  ? autoLevelMessage
-                  : mode === 'beat'
-                  ? beatStationMessage
-                  : mode === 'autotune'
-                  ? autotuneMessage
-                  : mode === 'repair'
-                  ? repairMessage
-                  : vocalFixMessage
-              }
-            />
-            {mode === 'assembly' && onCancelAssemblyLine && (
-              <button
-                type="button"
-                onClick={onCancelAssemblyLine}
-                className="w-full py-2 rounded-md text-[10px] font-mono border border-red-500/30 text-red-300 hover:bg-red-500/10"
-              >
-                CANCEL PIPELINE
-              </button>
-            )}
+              <ProgressBlock
+                color={assemblyTheme.color}
+                icon={<Factory size={14} />}
+                label={assemblyStage || 'Assembly Line'}
+                progress={assemblyProgress}
+                message={assemblyMessage}
+              />
+              {onCancelAssemblyLine && (
+                <button
+                  type="button"
+                  onClick={onCancelAssemblyLine}
+                  className="w-full py-2 rounded-md text-[10px] font-mono border border-red-500/30 text-red-300 hover:bg-red-500/10"
+                >
+                  CANCEL PIPELINE
+                </button>
+              )}
             </>
           ) : (
-            <>
-              {mode === 'assembly' && (
-                <>
-                  <DropZone
-                    dragOver={dragOver}
-                    setDragOver={setDragOver}
-                    onDrop={handleDrop}
-                    onFileInput={handleFileInput}
-                    color={theme.color}
-                    icon={<Factory size={20} />}
-                    title="Drop mix — full auto pipeline"
-                    subtitle="Analyze → repair → correct → level → master"
-                  />
-                  {isAssemblyLine && onCancelAssemblyLine && (
-                    <button
-                      type="button"
-                      onClick={onCancelAssemblyLine}
-                      className="w-full py-2 rounded-md text-[10px] font-mono border border-red-500/30 text-red-300 hover:bg-red-500/10"
-                    >
-                      CANCEL PIPELINE
-                    </button>
-                  )}
-                </>
-              )}
-
-              {mode === 'automix' && (
-                <>
-                  <div className="flex gap-1 flex-wrap">
-                    {stemConfig.map((stem) => (
-                      <button
-                        key={stem.type}
-                        onClick={() => setSelectedType(stem.type)}
-                        className={cn(
-                          'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-all',
-                          selectedType === stem.type
-                            ? 'text-black border-transparent'
-                            : 'text-studio-muted border-studio-border'
-                        )}
-                        style={
-                          selectedType === stem.type
-                            ? { backgroundColor: stem.color }
-                            : undefined
-                        }
-                      >
-                        {STEM_ICONS[stem.type]}
-                        {stem.label}
-                      </button>
-                    ))}
-                  </div>
-                  <DropZone
-                    dragOver={dragOver}
-                    setDragOver={setDragOver}
-                    onDrop={handleDrop}
-                    onFileInput={handleFileInput}
-                    color={theme.color}
-                    icon={<Upload size={20} />}
-                    title="Load stems into the mix console"
-                    subtitle="Multi-file · then run Auto Mix"
-                    multiple
-                  />
-                  {onAutoMix && (
-                    <button
-                      onClick={onAutoMix}
-                      disabled={existingStems.length < 2}
-                      className="w-full py-2.5 rounded-md text-[11px] font-display tracking-wider disabled:opacity-30 transition-all"
-                      style={{
-                        background: `linear-gradient(180deg, ${theme.color}, color-mix(in srgb, ${theme.color} 70%, #000))`,
-                        color: '#0a0a0c',
-                        boxShadow: `0 0 16px ${theme.glow}`,
-                      }}
-                    >
-                      RUN AUTO MIX
-                    </button>
-                  )}
-                </>
-              )}
-
-              {mode === 'automaster' && (
-                <DropZone
-                  dragOver={dragOver}
-                  setDragOver={setDragOver}
-                  onDrop={handleDrop}
-                  onFileInput={handleFileInput}
-                  color={theme.color}
-                  icon={<Wand2 size={20} />}
-                  title="Drop finished mix"
-                  subtitle="Stereo master · EQ → limit → LUFS"
-                />
-              )}
-
-              {mode === 'autolevel' && (
-                <>
-                  <div className="flex gap-1">
-                    {(
-                      [
-                        { id: 'mix' as LevelingMode, label: 'MIX −18' },
-                        { id: 'loudness' as LevelingMode, label: 'LOUD' },
-                        { id: 'peak' as LevelingMode, label: 'PEAK' },
-                      ] as const
-                    ).map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setLevelMode(m.id)}
-                        className="flex-1 py-1.5 rounded text-[8px] font-mono border transition-all"
-                        style={
-                          levelMode === m.id
-                            ? {
-                                color: theme.color,
-                                borderColor: `${theme.color}66`,
-                                background: theme.glow,
-                              }
-                            : { color: '#6b7280', borderColor: '#2c2c36' }
-                        }
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                  <DropZone
-                    dragOver={dragOver}
-                    setDragOver={setDragOver}
-                    onDrop={handleDrop}
-                    onFileInput={handleFileInput}
-                    color={theme.color}
-                    icon={<Volume2 size={20} />}
-                    title="Drop audio to gain-stage"
-                    subtitle="Healthy volume · not mastering"
-                  />
-                </>
-              )}
-
-              {mode === 'beat' && (
-                <DropZone
-                  dragOver={dragOver}
-                  setDragOver={setDragOver}
-                  onDrop={handleDrop}
-                  onFileInput={handleFileInput}
-                  color={theme.color}
-                  icon={<Drum size={20} />}
-                  title="Drop beat / instrumental"
-                  subtitle="Punch · sub · vocal pocket"
-                />
-              )}
-
-              {mode === 'autotune' && (
-                <>
-                  <div className="space-y-2 rounded-md border border-white/5 bg-black/30 p-2.5">
-                    <div className="flex items-center justify-between text-[9px] font-mono">
-                      <span className="text-studio-muted">NATURAL</span>
-                      <span style={{ color: theme.color }}>
-                        {autotuneIntensity} · {intensityToLabel(autotuneIntensity).toUpperCase()}
-                      </span>
-                      <span className="text-studio-muted">T-PAIN</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={autotuneIntensity}
-                      onChange={(e) => setAutotuneIntensity(Number(e.target.value))}
-                      className="w-full h-1.5"
-                      style={{ accentColor: theme.color }}
-                    />
-                    <div className="flex flex-wrap gap-1">
-                      {AUTOTUNE_PRESETS.map((p) => (
-                        <button
-                          key={p.label}
-                          title={p.description}
-                          onClick={() => setAutotuneIntensity(p.intensity)}
-                          className="px-1.5 py-0.5 rounded text-[8px] font-mono border"
-                          style={
-                            intensityToLabel(autotuneIntensity) === p.label
-                              ? {
-                                  color: theme.color,
-                                  borderColor: `${theme.color}66`,
-                                  background: theme.glow,
-                                }
-                              : { color: '#6b7280', borderColor: '#2c2c36' }
-                          }
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <DropZone
-                    dragOver={dragOver}
-                    setDragOver={setDragOver}
-                    onDrop={handleDrop}
-                    onFileInput={handleFileInput}
-                    color={theme.color}
-                    icon={<AudioLines size={20} />}
-                    title="Drop dry vocal"
-                    subtitle={`${intensityToLabel(autotuneIntensity)} @ ${autotuneIntensity}`}
-                  />
-                </>
-              )}
-
-              {mode === 'vocalfix' && (
-                <DropZone
-                  dragOver={dragOver}
-                  setDragOver={setDragOver}
-                  onDrop={handleDrop}
-                  onFileInput={handleFileInput}
-                  color={theme.color}
-                  icon={<Mic2 size={20} />}
-                  title="Drop vocal take"
-                  subtitle="Cleanup → pitch → EQ → chain"
-                />
-              )}
-
-              {mode === 'repair' && (
-                <DropZone
-                  dragOver={dragOver}
-                  setDragOver={setDragOver}
-                  onDrop={handleDrop}
-                  onFileInput={handleFileInput}
-                  color={theme.color}
-                  icon={<Wrench size={20} />}
-                  title="Drop noisy audio"
-                  subtitle="Denoise · declick · de-hum"
-                />
-              )}
-
-              {mode === 'delivery' && (
-                <div className="px-1 py-3 space-y-2 text-center">
-                  <Package size={20} className="mx-auto text-slate-400" />
-                  <p className="text-[11px] text-studio-text font-medium">Delivery Bay armed</p>
-                  <p className="text-[9px] text-studio-muted font-mono leading-relaxed">
-                    Use the Delivery panel in the left rail to bounce mix / stems with metadata.
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-
-          {existingStems.length > 0 && (
-            <div className="flex items-center justify-between pt-1 border-t border-white/5">
-              <span className="text-[9px] font-mono text-studio-muted">CHANNELS LOADED</span>
-              <span className="text-[10px] font-mono font-semibold tabular-nums" style={{ color: theme.color }}>
-                {existingStems.length}
-              </span>
-            </div>
+            <DropZone
+              dragOver={assemblyDragOver}
+              setDragOver={setAssemblyDragOver}
+              onDrop={handleAssemblyDrop}
+              onFileInput={handleAssemblyFileInput}
+              color={assemblyTheme.color}
+              icon={<Factory size={20} />}
+              title="Drop any finished mix"
+              subtitle="Hands-off · exits as mastered MP3"
+            />
           )}
         </div>
       </div>
+
+      {/* Manual / individual stations (optional) */}
+      <button
+        type="button"
+        onClick={() => setShowManualStations((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-studio-border/80 bg-black/20 hover:bg-white/[0.03] transition-colors"
+      >
+        <span className="text-[9px] font-mono tracking-wider text-studio-muted">
+          MANUAL STATIONS (OPTIONAL)
+        </span>
+        <span className="text-[9px] font-mono text-studio-muted">
+          {showManualStations ? 'HIDE' : 'SHOW'}
+        </span>
+      </button>
+
+      {showManualStations && (
+        <>
+          <div className="studio-rack px-3 py-2.5">
+            <span className="studio-screw top-1.5 left-1.5" />
+            <span className="studio-screw top-1.5 right-1.5" />
+            <span className="studio-screw bottom-1.5 left-1.5" />
+            <span className="studio-screw bottom-1.5 right-1.5" />
+            <div className="flex items-center justify-between px-1">
+              <div>
+                <p className="font-display text-[10px] tracking-[0.2em] text-studio-accent">SIGNAL PATH</p>
+                <p className="text-[9px] text-studio-muted font-mono mt-0.5">Run one bay at a time</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            {STATION_ORDER.filter((id) => id !== 'assembly').map((id) => {
+              const s = STATION_THEMES[id];
+              const active = mode === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => selectStation(id)}
+                  className={cn('station-module px-2.5 py-2.5', active && 'station-module-active')}
+                  style={
+                    {
+                      '--station-color': s.color,
+                      '--station-glow': s.glow,
+                      borderColor: active ? s.color : 'rgba(44,44,54,0.9)',
+                      background: active
+                        ? `linear-gradient(135deg, ${s.glow}, #121218 55%)`
+                        : undefined,
+                    } as React.CSSProperties
+                  }
+                >
+                  <span className="station-stripe" />
+                  <div className="pl-2 flex flex-col gap-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span style={{ color: s.color }}>{STATION_ICONS[id]}</span>
+                      <span
+                        className="font-display text-[9px] tracking-[0.12em] truncate"
+                        style={{ color: active ? s.color : '#9ca3af' }}
+                      >
+                        {s.short}
+                      </span>
+                      {active && (
+                        <span
+                          className="ml-auto studio-led studio-led-on shrink-0"
+                          style={{ background: s.color, color: s.color }}
+                        />
+                      )}
+                    </div>
+                    <p className="text-[8px] text-studio-muted leading-tight truncate text-left pl-0.5">
+                      {s.title}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            className="station-bay"
+            style={
+              {
+                '--station-color': theme.color,
+                '--station-glow': theme.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="station-bay-header">
+              <span className="studio-led" style={{ background: theme.color, color: theme.color }} />
+              <div className="min-w-0 flex-1">
+                <p className="font-display text-[11px] tracking-[0.14em]" style={{ color: theme.color }}>
+                  {theme.title.toUpperCase()}
+                </p>
+                <p className="text-[9px] text-studio-muted font-mono truncate">{theme.subtitle}</p>
+              </div>
+              <span
+                className="text-[8px] font-mono px-1.5 py-0.5 rounded border shrink-0"
+                style={{
+                  color: theme.color,
+                  borderColor: `${theme.color}55`,
+                  background: `${theme.color}18`,
+                }}
+              >
+                MANUAL
+              </span>
+            </div>
+
+            <div className="p-3 space-y-3">
+              {manualBusy ? (
+                <ProgressBlock
+                  color={theme.color}
+                  icon={STATION_ICONS[mode]}
+                  label={
+                    mode === 'automaster'
+                      ? 'Mastering'
+                      : mode === 'automix'
+                      ? 'Mixing'
+                      : mode === 'autolevel'
+                      ? 'Levelling'
+                      : mode === 'beat'
+                      ? 'Beat Lab'
+                      : mode === 'autotune'
+                      ? 'Auto-Tune'
+                      : mode === 'repair'
+                      ? 'Repair'
+                      : 'Vocal Fix'
+                  }
+                  progress={
+                    mode === 'automaster'
+                      ? quickMasterProgress
+                      : mode === 'automix'
+                      ? autoMixProgress
+                      : mode === 'autolevel'
+                      ? autoLevelProgress
+                      : mode === 'beat'
+                      ? beatStationProgress
+                      : mode === 'autotune'
+                      ? autotuneProgress
+                      : mode === 'repair'
+                      ? repairProgress
+                      : vocalFixProgress
+                  }
+                  message={
+                    mode === 'automaster'
+                      ? quickMasterMessage
+                      : mode === 'automix'
+                      ? autoMixMessage
+                      : mode === 'autolevel'
+                      ? autoLevelMessage
+                      : mode === 'beat'
+                      ? beatStationMessage
+                      : mode === 'autotune'
+                      ? autotuneMessage
+                      : mode === 'repair'
+                      ? repairMessage
+                      : vocalFixMessage
+                  }
+                />
+              ) : (
+                <>
+                  {mode === 'assembly' && (
+                    <p className="text-[10px] text-studio-muted font-mono text-center py-2">
+                      Use the Full Auto drop zone above — no station switching needed.
+                    </p>
+                  )}
+
+                  {mode === 'automix' && (
+                    <>
+                      <div className="flex gap-1 flex-wrap">
+                        {stemConfig.map((stem) => (
+                          <button
+                            key={stem.type}
+                            onClick={() => setSelectedType(stem.type)}
+                            className={cn(
+                              'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-all',
+                              selectedType === stem.type
+                                ? 'text-black border-transparent'
+                                : 'text-studio-muted border-studio-border'
+                            )}
+                            style={
+                              selectedType === stem.type
+                                ? { backgroundColor: stem.color }
+                                : undefined
+                            }
+                          >
+                            {STEM_ICONS[stem.type]}
+                            {stem.label}
+                          </button>
+                        ))}
+                      </div>
+                      <DropZone
+                        dragOver={dragOver}
+                        setDragOver={setDragOver}
+                        onDrop={handleDrop}
+                        onFileInput={handleFileInput}
+                        color={theme.color}
+                        icon={<Upload size={20} />}
+                        title="Load stems into the mix console"
+                        subtitle="Multi-file · then run Auto Mix"
+                        multiple
+                      />
+                      {onAutoMix && (
+                        <button
+                          onClick={onAutoMix}
+                          disabled={existingStems.length < 2}
+                          className="w-full py-2.5 rounded-md text-[11px] font-display tracking-wider disabled:opacity-30 transition-all"
+                          style={{
+                            background: `linear-gradient(180deg, ${theme.color}, color-mix(in srgb, ${theme.color} 70%, #000))`,
+                            color: '#0a0a0c',
+                            boxShadow: `0 0 16px ${theme.glow}`,
+                          }}
+                        >
+                          RUN AUTO MIX
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {mode === 'automaster' && (
+                    <DropZone
+                      dragOver={dragOver}
+                      setDragOver={setDragOver}
+                      onDrop={handleDrop}
+                      onFileInput={handleFileInput}
+                      color={theme.color}
+                      icon={<Wand2 size={20} />}
+                      title="Drop finished mix"
+                      subtitle="Stereo master · EQ → limit → LUFS"
+                    />
+                  )}
+
+                  {mode === 'autolevel' && (
+                    <>
+                      <div className="flex gap-1">
+                        {(
+                          [
+                            { id: 'mix' as LevelingMode, label: 'MIX −18' },
+                            { id: 'loudness' as LevelingMode, label: 'LOUD' },
+                            { id: 'peak' as LevelingMode, label: 'PEAK' },
+                          ] as const
+                        ).map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setLevelMode(m.id)}
+                            className="flex-1 py-1.5 rounded text-[8px] font-mono border transition-all"
+                            style={
+                              levelMode === m.id
+                                ? {
+                                    color: theme.color,
+                                    borderColor: `${theme.color}66`,
+                                    background: theme.glow,
+                                  }
+                                : { color: '#6b7280', borderColor: '#2c2c36' }
+                            }
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                      <DropZone
+                        dragOver={dragOver}
+                        setDragOver={setDragOver}
+                        onDrop={handleDrop}
+                        onFileInput={handleFileInput}
+                        color={theme.color}
+                        icon={<Volume2 size={20} />}
+                        title="Drop audio to gain-stage"
+                        subtitle="Healthy volume · not mastering"
+                      />
+                    </>
+                  )}
+
+                  {mode === 'beat' && (
+                    <DropZone
+                      dragOver={dragOver}
+                      setDragOver={setDragOver}
+                      onDrop={handleDrop}
+                      onFileInput={handleFileInput}
+                      color={theme.color}
+                      icon={<Drum size={20} />}
+                      title="Drop beat / instrumental"
+                      subtitle="Punch · sub · vocal pocket"
+                    />
+                  )}
+
+                  {mode === 'autotune' && (
+                    <>
+                      <div className="space-y-2 rounded-md border border-white/5 bg-black/30 p-2.5">
+                        <div className="flex items-center justify-between text-[9px] font-mono">
+                          <span className="text-studio-muted">NATURAL</span>
+                          <span style={{ color: theme.color }}>
+                            {autotuneIntensity} · {intensityToLabel(autotuneIntensity).toUpperCase()}
+                          </span>
+                          <span className="text-studio-muted">T-PAIN</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={autotuneIntensity}
+                          onChange={(e) => setAutotuneIntensity(Number(e.target.value))}
+                          className="w-full h-1.5"
+                          style={{ accentColor: theme.color }}
+                        />
+                        <div className="flex flex-wrap gap-1">
+                          {AUTOTUNE_PRESETS.map((p) => (
+                            <button
+                              key={p.label}
+                              title={p.description}
+                              onClick={() => setAutotuneIntensity(p.intensity)}
+                              className="px-1.5 py-0.5 rounded text-[8px] font-mono border"
+                              style={
+                                intensityToLabel(autotuneIntensity) === p.label
+                                  ? {
+                                      color: theme.color,
+                                      borderColor: `${theme.color}66`,
+                                      background: theme.glow,
+                                    }
+                                  : { color: '#6b7280', borderColor: '#2c2c36' }
+                              }
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <DropZone
+                        dragOver={dragOver}
+                        setDragOver={setDragOver}
+                        onDrop={handleDrop}
+                        onFileInput={handleFileInput}
+                        color={theme.color}
+                        icon={<AudioLines size={20} />}
+                        title="Drop dry vocal"
+                        subtitle={`${intensityToLabel(autotuneIntensity)} @ ${autotuneIntensity}`}
+                      />
+                    </>
+                  )}
+
+                  {mode === 'vocalfix' && (
+                    <DropZone
+                      dragOver={dragOver}
+                      setDragOver={setDragOver}
+                      onDrop={handleDrop}
+                      onFileInput={handleFileInput}
+                      color={theme.color}
+                      icon={<Mic2 size={20} />}
+                      title="Drop vocal take"
+                      subtitle="Cleanup → pitch → EQ → chain"
+                    />
+                  )}
+
+                  {mode === 'repair' && (
+                    <DropZone
+                      dragOver={dragOver}
+                      setDragOver={setDragOver}
+                      onDrop={handleDrop}
+                      onFileInput={handleFileInput}
+                      color={theme.color}
+                      icon={<Wrench size={20} />}
+                      title="Drop noisy / damaged audio"
+                      subtitle="Denoise · declick · de-hum"
+                    />
+                  )}
+
+                  {mode === 'delivery' && (
+                    <p className="text-[10px] text-studio-muted font-mono text-center leading-relaxed py-3">
+                      Use Delivery Bay below for bounce options. Full Auto already downloads the mastered MP3 when the pipeline finishes.
+                    </p>
+                  )}
+                </>
+              )}
+
+              {existingStems.length > 0 && (
+                <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                  <span className="text-[9px] font-mono text-studio-muted">CHANNELS LOADED</span>
+                  <span className="text-[10px] font-mono font-semibold tabular-nums" style={{ color: theme.color }}>
+                    {existingStems.length}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

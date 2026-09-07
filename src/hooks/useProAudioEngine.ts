@@ -2086,10 +2086,80 @@ export function useProAudioEngine() {
       setAssemblyResult(result.report);
       setSelectedStemId(processedId);
 
+      // ── Auto-deliver: download mastered file without switching bays ──
+      setAssemblyStage(ASSEMBLY_STAGE_LABELS.deliver);
+      setAssemblyMessage('Exporting mastered MP3...');
+      setAssemblyProgress(96);
+      try {
+        const finalStem: Stem = {
+          id: processedId,
+          name: `${trackName} — Final`,
+          type: 'fullmix',
+          file: null,
+          audioBuffer: result.finalBuffer,
+          processing: cloneStemProcessing(),
+          waveformData: [],
+          peakLevel: 0,
+          rmsLevel: 0,
+          busId: defaultBusIdForStem('fullmix'),
+          sends: defaultSends(),
+        };
+        const blob = await engine.exportMP3(
+          [finalStem],
+          defaultMasterProcessing,
+          result.finalBuffer.duration,
+          320,
+          (p) => {
+            setAssemblyProgress(96 + Math.round(p * 0.03));
+            setAssemblyMessage(`Exporting mastered MP3... ${Math.round(p)}%`);
+          }
+        );
+        downloadBlob(blob, `${trackName}-mastered-320kbps.mp3`);
+        setAssemblyMessage('Downloaded · starting playback...');
+      } catch (exportErr) {
+        console.warn('Auto MP3 export failed, falling back to WAV:', exportErr);
+        try {
+          const finalStem: Stem = {
+            id: processedId,
+            name: `${trackName} — Final`,
+            type: 'fullmix',
+            file: null,
+            audioBuffer: result.finalBuffer,
+            processing: cloneStemProcessing(),
+            waveformData: [],
+            peakLevel: 0,
+            rmsLevel: 0,
+            busId: defaultBusIdForStem('fullmix'),
+            sends: defaultSends(),
+          };
+          const wavBlob = await engine.exportStem(
+            finalStem,
+            defaultMasterProcessing,
+            result.finalBuffer.duration,
+            24,
+            'noise-shaped'
+          );
+          downloadBlob(wavBlob, `${trackName}-mastered.wav`);
+          setAssemblyMessage('Downloaded WAV · starting playback...');
+        } catch (wavErr) {
+          console.error('Auto export failed:', wavErr);
+          setAssemblyMessage('Master ready — use Export panel to download.');
+        }
+      }
+
+      // Auto-play the finished master
+      try {
+        engine.stop();
+        engine.play(0);
+        setTransport((prev) => ({ ...prev, isPlaying: true, currentTime: 0 }));
+      } catch {
+        /* playback may require a gesture on some browsers — download still works */
+      }
+
       setAssemblyProgress(100);
-      setAssemblyMessage('Assembly line complete!');
+      setAssemblyMessage('Assembly complete — file downloaded & playing!');
       setAssemblyStage(ASSEMBLY_STAGE_LABELS.done);
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 1200));
     } catch (err: unknown) {
       const name = err && typeof err === 'object' && 'name' in err ? (err as { name: string }).name : '';
       const message =

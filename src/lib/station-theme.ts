@@ -27,7 +27,7 @@ export const STATION_THEMES: Record<StationId, StationTheme> = {
     id: 'assembly',
     short: 'ASSEMBLY',
     title: 'Assembly Line',
-    subtitle: 'Analyze → repair → correct → master',
+    subtitle: 'Drop once → full mix/master → MP3',
     color: '#a78bfa',
     glow: 'rgba(167, 139, 250, 0.18)',
     textClass: 'text-violet-400',

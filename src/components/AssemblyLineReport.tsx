@@ -21,6 +21,7 @@ const STAGE_ORDER: AssemblyStageId[] = [
   'fix',
   'level',
   'master',
+  'deliver',
   'done',
 ];
 
@@ -89,6 +90,10 @@ export default function AssemblyLineReport({
             {result.sectionCount} sections · ~{Math.round(result.bpm)} BPM ·{' '}
             {result.finalLUFS.toFixed(1)} LUFS · TP {result.truePeak.toFixed(1)}
           </div>
+
+          <p className="text-[9px] text-emerald-300/80 font-mono">
+            Mastered MP3 auto-downloaded · Final track is playing
+          </p>
 
           {result.diagnosis.issues.length > 0 && (
             <ul className="space-y-1">

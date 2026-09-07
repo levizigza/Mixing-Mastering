@@ -632,12 +632,12 @@ export default function StudioPage() {
                       <Headphones size={28} />
                     </div>
                     <p className="font-display text-[12px] tracking-[0.16em] text-studio-text">
-                      MIXER IDLE
+                      READY FOR FULL AUTO
                     </p>
                     <p className="text-[11px] text-studio-muted leading-relaxed">
-                      Select a colored bay on the left —{' '}
-                      <span style={{ color: activeTheme.color }}>{activeTheme.title}</span>
-                      {' '}is armed. Drop audio into that bay to process.
+                      Drop a mix into the{' '}
+                      <span style={{ color: activeTheme.color }}>Full Auto Assembly Line</span>
+                      {' '}on the left. It runs analyze → repair → correct → level → master → download — no switching needed.
                     </p>
                     <div className="flex flex-wrap justify-center gap-1.5 pt-1">
                       {Object.values(STATION_THEMES).map((s) => (
