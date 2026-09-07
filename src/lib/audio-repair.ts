@@ -82,91 +82,157 @@ function noiseGate(data: Float32Array, sr: number, amount: number): Float32Array
   return out;
 }
 
-/** Simple magnitude spectral subtract denoise on overlapping frames. */
-function spectralDenoise(data: Float32Array, sr: number, amount: number): Float32Array {
-  if (amount < 0.05) return data;
-  const frameSize = 1024;
-  const hop = 256;
-  const out = new Float32Array(data.length);
+/** Hann window helper */
+function makeHann(frameSize: number): Float32Array {
   const window = new Float32Array(frameSize);
   for (let i = 0; i < frameSize; i++) {
     window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameSize - 1)));
   }
-  // Noise profile from quietest 5% energy frames in first 2s
-  const profileLen = Math.min(data.length, Math.floor(sr * 2));
-  const noiseMag = new Float32Array(frameSize / 2);
-  let noiseFrames = 0;
-  const energies: { start: number; e: number }[] = [];
-  for (let start = 0; start + frameSize < profileLen; start += hop) {
-    let e = 0;
-    for (let i = 0; i < frameSize; i++) e += data[start + i] * data[start + i];
-    energies.push({ start, e });
-  }
-  energies.sort((a, b) => a.e - b.e);
-  const take = Math.max(1, Math.floor(energies.length * 0.15));
-  for (let n = 0; n < take; n++) {
-    const start = energies[n].start;
-    for (let k = 0; k < frameSize / 2; k++) {
-      let re = 0;
-      let im = 0;
-      for (let i = 0; i < frameSize; i++) {
-        const ang = (-2 * Math.PI * k * i) / frameSize;
-        const s = data[start + i] * window[i];
-        re += s * Math.cos(ang);
-        im += s * Math.sin(ang);
-      }
-      noiseMag[k] += Math.sqrt(re * re + im * im);
-    }
-    noiseFrames++;
-  }
-  if (noiseFrames > 0) {
-    for (let k = 0; k < noiseMag.length; k++) noiseMag[k] /= noiseFrames;
-  }
+  return window;
+}
 
+/** In-place radix-2 Cooley–Tukey FFT (length must be power of 2). */
+function fftRadix2(re: Float32Array, im: Float32Array, inverse: boolean) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      const tr = re[i];
+      re[i] = re[j];
+      re[j] = tr;
+      const ti = im[i];
+      im[i] = im[j];
+      im[j] = ti;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = ((inverse ? 2 : -2) * Math.PI) / len;
+    const wlenRe = Math.cos(ang);
+    const wlenIm = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let wRe = 1;
+      let wIm = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const uRe = re[i + j];
+        const uIm = im[i + j];
+        const vRe = re[i + j + len / 2] * wRe - im[i + j + len / 2] * wIm;
+        const vIm = re[i + j + len / 2] * wIm + im[i + j + len / 2] * wRe;
+        re[i + j] = uRe + vRe;
+        im[i + j] = uIm + vIm;
+        re[i + j + len / 2] = uRe - vRe;
+        im[i + j + len / 2] = uIm - vIm;
+        const nextWRe = wRe * wlenRe - wIm * wlenIm;
+        wIm = wRe * wlenIm + wIm * wlenRe;
+        wRe = nextWRe;
+      }
+    }
+  }
+  if (inverse) {
+    for (let i = 0; i < n; i++) {
+      re[i] /= n;
+      im[i] /= n;
+    }
+  }
+}
+
+/**
+ * Magnitude spectral subtract denoise on overlapping frames.
+ * FFT keeps full-spectrum quality without the naive-DFT freeze; yields keep the UI alive.
+ * Quality first: never skip this stage on long tracks.
+ */
+async function spectralDenoise(
+  data: Float32Array,
+  sr: number,
+  amount: number,
+  noiseMag?: Float32Array
+): Promise<{ out: Float32Array; noiseMag: Float32Array }> {
+  if (amount < 0.05) return { out: data, noiseMag: noiseMag ?? new Float32Array(0) };
+
+  const frameSize = 1024;
+  const hop = 256;
+  const bins = frameSize / 2;
+  const out = new Float32Array(data.length);
+  const window = makeHann(frameSize);
   const winSum = new Float32Array(data.length);
   const strength = amount * 0.85;
-  for (let start = 0; start + frameSize <= data.length; start += hop) {
-    const frame = new Float32Array(frameSize);
-    for (let i = 0; i < frameSize; i++) frame[i] = data[start + i] * window[i];
-    // Very light DFT subtract (only low bins for speed — first 128)
-    const bins = Math.min(128, frameSize / 2);
-    const re = new Float32Array(bins);
-    const im = new Float32Array(bins);
-    for (let k = 0; k < bins; k++) {
-      let r = 0;
-      let m = 0;
-      for (let i = 0; i < frameSize; i++) {
-        const ang = (-2 * Math.PI * k * i) / frameSize;
-        r += frame[i] * Math.cos(ang);
-        m += frame[i] * Math.sin(ang);
-      }
-      const mag = Math.sqrt(r * r + m * m);
-      const clean = Math.max(0, mag - noiseMag[k] * strength);
-      const scale = mag > 1e-8 ? clean / mag : 0;
-      re[k] = r * scale;
-      im[k] = m * scale;
+  const re = new Float32Array(frameSize);
+  const im = new Float32Array(frameSize);
+
+  let profile = noiseMag;
+  if (!profile || profile.length !== bins) {
+    profile = new Float32Array(bins);
+    const profileLen = Math.min(data.length, Math.floor(sr * 2));
+    const energies: { start: number; e: number }[] = [];
+    for (let start = 0; start + frameSize < profileLen; start += hop) {
+      let e = 0;
+      for (let i = 0; i < frameSize; i++) e += data[start + i] * data[start + i];
+      energies.push({ start, e });
     }
-    // Inverse partial — blend with dry frame
-    const syn = new Float32Array(frameSize);
-    for (let i = 0; i < frameSize; i++) {
-      let s = 0;
+    energies.sort((a, b) => a.e - b.e);
+    const take = Math.max(1, Math.floor(energies.length * 0.15));
+    let noiseFrames = 0;
+    for (let n = 0; n < take; n++) {
+      const start = energies[n].start;
+      re.fill(0);
+      im.fill(0);
+      for (let i = 0; i < frameSize; i++) re[i] = data[start + i] * window[i];
+      fftRadix2(re, im, false);
       for (let k = 0; k < bins; k++) {
-        const ang = (2 * Math.PI * k * i) / frameSize;
-        s += (re[k] * Math.cos(ang) - im[k] * Math.sin(ang)) / frameSize;
+        profile[k] += Math.sqrt(re[k] * re[k] + im[k] * im[k]);
       }
-      syn[i] = frame[i] * (1 - strength * 0.5) + s * strength * 0.5;
+      noiseFrames++;
     }
-    for (let i = 0; i < frameSize; i++) {
-      if (start + i < out.length) {
-        out[start + i] += syn[i] * window[i];
-        winSum[start + i] += window[i] * window[i];
-      }
+    if (noiseFrames > 0) {
+      for (let k = 0; k < profile.length; k++) profile[k] /= noiseFrames;
     }
   }
+
+  const yieldEvery = Math.max(1, Math.floor((sr * 0.35) / hop));
+  let frames = 0;
+
+  for (let start = 0; start + frameSize <= data.length; start += hop) {
+    re.fill(0);
+    im.fill(0);
+    for (let i = 0; i < frameSize; i++) re[i] = data[start + i] * window[i];
+    fftRadix2(re, im, false);
+
+    for (let k = 0; k <= bins; k++) {
+      const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      const clean = Math.max(0, mag - profile[k < bins ? k : bins - 1] * strength);
+      const scale = mag > 1e-8 ? clean / mag : 0;
+      re[k] *= scale;
+      im[k] *= scale;
+      if (k > 0 && k < bins) {
+        re[frameSize - k] = re[k];
+        im[frameSize - k] = -im[k];
+      }
+    }
+    im[0] = 0;
+    im[bins] = 0;
+
+    fftRadix2(re, im, true);
+
+    const wetMix = strength * 0.45;
+    for (let i = 0; i < frameSize; i++) {
+      const dry = data[start + i] * window[i];
+      const wet = re[i];
+      const syn = dry * (1 - wetMix) + wet * wetMix;
+      out[start + i] += syn * window[i];
+      winSum[start + i] += window[i] * window[i];
+    }
+
+    frames++;
+    if (frames % yieldEvery === 0) {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+  }
+
   for (let i = 0; i < out.length; i++) {
     out[i] = winSum[i] > 0.1 ? out[i] / winSum[i] : data[i];
   }
-  return out;
+  return { out, noiseMag: profile };
 }
 
 function deClick(data: Float32Array, amount: number): Float32Array {
@@ -272,21 +338,27 @@ export async function runAudioRepair(
   onProgress?.(30, 'Noise gate / denoise...');
   await new Promise((r) => setTimeout(r, 0));
   channels = channels.map((c) => noiseGate(c, sr, settings.denoise / 100));
-  // Denoise: gate always; spectral only on short clips (full STFT freezes long MP3s)
-  const isLong = buffer.duration > 25;
-  if (settings.denoise > 20 && !isLong) {
-    onProgress?.(40, 'Spectral denoise...');
+  // Spectral denoise on every channel for full-length tracks — yields keep UI alive
+  if (settings.denoise > 20) {
+    onProgress?.(40, 'Spectral denoise (all channels)...');
     await new Promise((r) => setTimeout(r, 0));
-    // Channel 0 only — duplicate result to other channels for speed
-    const denoised0 = spectralDenoise(channels[0], sr, settings.denoise / 100);
-    channels = channels.map((c, idx) => {
-      if (idx === 0) return denoised0;
-      // Keep other channels gated; mild blend toward ch0 magnitude envelope not needed
-      return c;
-    });
-    notes.push('Spectral denoise + gate applied.');
+    let sharedProfile: Float32Array | undefined;
+    const denoised: Float32Array[] = [];
+    for (let ch = 0; ch < channels.length; ch++) {
+      onProgress?.(40 + Math.round((ch / channels.length) * 12), `Spectral denoise ch ${ch + 1}...`);
+      const { out, noiseMag } = await spectralDenoise(
+        channels[ch],
+        sr,
+        settings.denoise / 100,
+        sharedProfile
+      );
+      if (!sharedProfile) sharedProfile = noiseMag;
+      denoised.push(out);
+    }
+    channels = denoised;
+    notes.push('Spectral denoise + gate applied (full spectrum, all channels).');
   } else if (settings.denoise > 10) {
-    notes.push(isLong ? 'Noise gate applied (spectral skipped for long track).' : 'Noise gate applied.');
+    notes.push('Noise gate applied.');
   }
   stages.push('Denoise');
 
@@ -320,7 +392,7 @@ export async function runAudioRepair(
 
   onProgress?.(92, 'Light de-reverb...');
   await new Promise((r) => setTimeout(r, 0));
-  if (settings.dereverb > 10 && !isLong) {
+  if (settings.dereverb > 10) {
     const chs: Float32Array[] = [];
     for (let ch = 0; ch < out.numberOfChannels; ch++) {
       chs.push(lightDereverb(new Float32Array(out.getChannelData(ch)), sr, settings.dereverb / 100));
@@ -328,8 +400,6 @@ export async function runAudioRepair(
     out = createBuffer(chs, sr);
     notes.push('Shortened residual room tail.');
     stages.push('De-reverb');
-  } else if (settings.dereverb > 10 && isLong) {
-    notes.push('De-reverb skipped for long track (keeps UI responsive).');
   }
 
   if (notes.length === 0) notes.push('Light cleanup pass completed.');

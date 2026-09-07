@@ -2,6 +2,7 @@
  * Encode an already-rendered AudioBuffer to MP3/WAV without re-running
  * OfflineAudioContext / worklet chains. Critical for long real-world tracks
  * in the Assembly Line (avoids a second multi-minute render that freezes the tab).
+ * Direct encode preserves the mastered buffer bit-for-bit into the file.
  */
 
 async function yieldToUI() {
@@ -12,12 +13,16 @@ function floatTo16(sample: number): number {
   return Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
 }
 
-/** WAV (16-bit PCM) from an AudioBuffer — no DSP re-render. */
-export function encodeBufferToWAV(buffer: AudioBuffer): Blob {
+function floatTo24(sample: number): number {
+  return Math.max(-8388608, Math.min(8388607, Math.round(sample * 8388607)));
+}
+
+/** WAV PCM from an AudioBuffer — no DSP re-render. Default 24-bit for master quality. */
+export function encodeBufferToWAV(buffer: AudioBuffer, bitDepth: 16 | 24 = 24): Blob {
   const numChannels = Math.min(2, Math.max(1, buffer.numberOfChannels));
   const sampleRate = buffer.sampleRate;
   const length = buffer.length;
-  const bytesPerSample = 2;
+  const bytesPerSample = bitDepth === 24 ? 3 : 2;
   const blockAlign = numChannels * bytesPerSample;
   const dataSize = length * blockAlign;
   const arrayBuffer = new ArrayBuffer(44 + dataSize);
@@ -37,7 +42,7 @@ export function encodeBufferToWAV(buffer: AudioBuffer): Blob {
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, sampleRate * blockAlign, true);
   view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
+  view.setUint16(34, bitDepth, true);
   writeStr(36, 'data');
   view.setUint32(40, dataSize, true);
 
@@ -45,11 +50,23 @@ export function encodeBufferToWAV(buffer: AudioBuffer): Blob {
   const R = numChannels > 1 ? buffer.getChannelData(1) : L;
   let offset = 44;
   for (let i = 0; i < length; i++) {
-    view.setInt16(offset, floatTo16(L[i]), true);
-    offset += 2;
-    if (numChannels > 1) {
-      view.setInt16(offset, floatTo16(R[i]), true);
+    if (bitDepth === 24) {
+      const write24 = (s: number) => {
+        const v = floatTo24(s);
+        view.setUint8(offset, v & 0xff);
+        view.setUint8(offset + 1, (v >> 8) & 0xff);
+        view.setUint8(offset + 2, (v >> 16) & 0xff);
+        offset += 3;
+      };
+      write24(L[i]);
+      if (numChannels > 1) write24(R[i]);
+    } else {
+      view.setInt16(offset, floatTo16(L[i]), true);
       offset += 2;
+      if (numChannels > 1) {
+        view.setInt16(offset, floatTo16(R[i]), true);
+        offset += 2;
+      }
     }
   }
 
@@ -57,7 +74,7 @@ export function encodeBufferToWAV(buffer: AudioBuffer): Blob {
 }
 
 /**
- * Encode AudioBuffer → MP3 via lamejs.
+ * Encode AudioBuffer → MP3 via lamejs (320 kbps CBR = max MP3 quality).
  * Yields periodically so the UI stays responsive on multi-minute tracks.
  */
 export async function encodeBufferToMP3(

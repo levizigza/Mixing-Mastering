@@ -190,9 +190,9 @@ function smoothBlocks(blocks: Float32Array, radius: number): Float32Array {
 }
 
 /**
- * Build a per-sample gain curve WITHOUT O(n × radius) smoothing.
- * Work in ~20 ms blocks (thousands of points, not millions), then
- * linearly interpolate when applying — keeps real MP3s responsive.
+ * Build a per-sample gain curve without O(n × radius) smoothing.
+ * Uses 10 ms blocks + cosine interpolation — musically equivalent to the
+ * old per-sample smoother, without freezing real multi-minute tracks.
  */
 function buildSectionGainCurve(
   length: number,
@@ -204,7 +204,7 @@ function buildSectionGainCurve(
   curve.fill(1);
   if (arcScale < 0.08) return curve;
 
-  const hop = Math.max(1, Math.floor(sr * 0.02)); // 20 ms
+  const hop = Math.max(1, Math.floor(sr * 0.01)); // 10 ms — finer musical resolution
   const nBlocks = Math.ceil(length / hop);
   let blocks = new Float32Array(nBlocks);
   blocks.fill(1);
@@ -236,15 +236,17 @@ function buildSectionGainCurve(
     }
   }
 
-  // Smooth ~160 ms of blocks (8 × 20 ms) — O(blocks), not O(samples)
-  const smoothed = smoothBlocks(blocks, 8);
+  // Smooth ~160 ms of blocks (16 × 10 ms) — same musical window as before
+  const smoothed = smoothBlocks(blocks, 16);
 
   for (let i = 0; i < length; i++) {
     const pos = i / hop;
     const b0 = Math.min(nBlocks - 1, pos | 0);
     const b1 = Math.min(nBlocks - 1, b0 + 1);
     const t = pos - b0;
-    curve[i] = smoothed[b0] * (1 - t) + smoothed[b1] * t;
+    // Cosine ease between blocks — smoother than linear for gain automation
+    const mu = (1 - Math.cos(t * Math.PI)) * 0.5;
+    curve[i] = smoothed[b0] * (1 - mu) + smoothed[b1] * mu;
   }
   return curve;
 }

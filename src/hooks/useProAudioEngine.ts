@@ -2091,25 +2091,38 @@ export function useProAudioEngine() {
       setAssemblyResult(result.report);
       setSelectedStemId(processedId);
 
-      // ── Auto-deliver: encode the final buffer directly (no Offline re-render) ──
+      // ── Auto-deliver: 24-bit WAV (archive) + 320kbps MP3 (streaming) ──
+      // Encodes the mastered buffer directly — no second DSP pass that could alter tone.
       setAssemblyStage(ASSEMBLY_STAGE_LABELS.deliver);
-      setAssemblyMessage('Exporting mastered MP3...');
+      setAssemblyMessage('Exporting 24-bit WAV master...');
       setAssemblyProgress(96);
       try {
-        const blob = await encodeBufferToMP3(result.finalBuffer, 320, (p) => {
-          setAssemblyProgress(96 + Math.round(p * 0.03));
-          setAssemblyMessage(`Exporting mastered MP3... ${Math.round(p)}%`);
-        });
-        downloadBlob(blob, `${trackName}-mastered-320kbps.mp3`);
-        setAssemblyMessage('Downloaded · starting playback...');
-      } catch (exportErr) {
-        console.warn('Auto MP3 export failed, falling back to WAV:', exportErr);
+        const wavBlob = encodeBufferToWAV(result.finalBuffer, 24);
+        downloadBlob(wavBlob, `${trackName}-mastered-24bit.wav`);
+        setAssemblyMessage('WAV saved · encoding MP3...');
+        setAssemblyProgress(97);
         try {
-          const wavBlob = encodeBufferToWAV(result.finalBuffer);
-          downloadBlob(wavBlob, `${trackName}-mastered.wav`);
-          setAssemblyMessage('Downloaded WAV · starting playback...');
-        } catch (wavErr) {
-          console.error('Auto export failed:', wavErr);
+          const blob = await encodeBufferToMP3(result.finalBuffer, 320, (p) => {
+            setAssemblyProgress(97 + Math.round(p * 0.02));
+            setAssemblyMessage(`Encoding streaming MP3... ${Math.round(p)}%`);
+          });
+          downloadBlob(blob, `${trackName}-mastered-320kbps.mp3`);
+          setAssemblyMessage('WAV + MP3 downloaded · starting playback...');
+        } catch (mp3Err) {
+          console.warn('MP3 encode failed after WAV success:', mp3Err);
+          setAssemblyMessage('24-bit WAV downloaded · starting playback...');
+        }
+      } catch (exportErr) {
+        console.warn('WAV export failed, trying MP3 only:', exportErr);
+        try {
+          const blob = await encodeBufferToMP3(result.finalBuffer, 320, (p) => {
+            setAssemblyProgress(96 + Math.round(p * 0.03));
+            setAssemblyMessage(`Exporting mastered MP3... ${Math.round(p)}%`);
+          });
+          downloadBlob(blob, `${trackName}-mastered-320kbps.mp3`);
+          setAssemblyMessage('Downloaded · starting playback...');
+        } catch (mp3Err) {
+          console.error('Auto export failed:', mp3Err);
           setAssemblyMessage('Master ready — use Export panel to download.');
         }
       }
@@ -2124,7 +2137,8 @@ export function useProAudioEngine() {
       }
 
       setAssemblyProgress(100);
-      setAssemblyMessage('Assembly complete — file downloaded & playing!');
+      setAssemblyMessage('Assembly complete — 24-bit WAV + MP3 ready!');
+
       setAssemblyStage(ASSEMBLY_STAGE_LABELS.done);
       await new Promise((r) => setTimeout(r, 1200));
     } catch (err: unknown) {

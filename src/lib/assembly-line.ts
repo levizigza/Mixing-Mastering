@@ -98,7 +98,7 @@ function hasIssue(issues: PipelineIssue[], id: string, min: 'low' | 'medium' | '
 
 function repairFromDiagnosis(d: PipelineDiagnosis): RepairSettings {
   const s = { ...d.repairSettings };
-  // Meaningful cleanup — gate always helps; spectral only on shorter clips (handled in runAudioRepair)
+  // Full cleanup on every track length — quality first (repair yields keep UI alive)
   if (hasIssue(d.issues, 'noiseFloor', 'low')) s.denoise = Math.max(s.denoise, 48);
   if (hasIssue(d.issues, 'clipping', 'medium')) s.declip = Math.max(s.declip, 60);
   if (hasIssue(d.issues, 'clipping', 'high')) s.declip = 75;
