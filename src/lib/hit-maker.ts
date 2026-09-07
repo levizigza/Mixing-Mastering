@@ -172,21 +172,81 @@ function enhanceTransients(data: Float32Array, sr: number, amountDb: number): Fl
   return out;
 }
 
-function smoothCurve(curve: Float32Array, radius: number): Float32Array {
-  if (radius < 2) return curve;
-  const out = new Float32Array(curve.length);
-  for (let i = 0; i < curve.length; i++) {
+function smoothBlocks(blocks: Float32Array, radius: number): Float32Array {
+  if (radius < 1) return blocks;
+  const out = new Float32Array(blocks.length);
+  for (let i = 0; i < blocks.length; i++) {
     let sum = 0,
       n = 0;
     const a = Math.max(0, i - radius);
-    const b = Math.min(curve.length - 1, i + radius);
+    const b = Math.min(blocks.length - 1, i + radius);
     for (let j = a; j <= b; j++) {
-      sum += curve[j];
+      sum += blocks[j];
       n++;
     }
     out[i] = sum / (n || 1);
   }
   return out;
+}
+
+/**
+ * Build a per-sample gain curve WITHOUT O(n × radius) smoothing.
+ * Work in ~20 ms blocks (thousands of points, not millions), then
+ * linearly interpolate when applying — keeps real MP3s responsive.
+ */
+function buildSectionGainCurve(
+  length: number,
+  sr: number,
+  sections: SongSection[],
+  arcScale: number
+): Float32Array {
+  const curve = new Float32Array(length);
+  curve.fill(1);
+  if (arcScale < 0.08) return curve;
+
+  const hop = Math.max(1, Math.floor(sr * 0.02)); // 20 ms
+  const nBlocks = Math.ceil(length / hop);
+  let blocks = new Float32Array(nBlocks);
+  blocks.fill(1);
+
+  if (!sections.length) {
+    const mid = (nBlocks - 1) / 2;
+    const half = nBlocks * 0.4;
+    for (let b = 0; b < nBlocks; b++) {
+      const d = Math.abs(b - mid) / Math.max(1, half);
+      const shape = Math.max(0, 1 - d * d);
+      blocks[b] = Math.pow(10, (arcScale * 0.9 * shape) / 20);
+    }
+  } else {
+    const kindDb: Record<string, number> = {
+      intro: -1.0 * arcScale,
+      verse: -0.45 * arcScale,
+      bridge: -0.15 * arcScale,
+      chorus: 1.5 * arcScale,
+      outro: -0.7 * arcScale,
+      custom: 0.25 * arcScale,
+    };
+    for (const s of sections) {
+      const startB = Math.max(0, Math.floor((s.start * sr) / hop));
+      const endB = Math.min(nBlocks, Math.ceil((s.end * sr) / hop));
+      const db = kindDb[s.kind] ?? 0;
+      if (Math.abs(db) < 0.04) continue;
+      const g = Math.pow(10, db / 20);
+      for (let b = startB; b < endB; b++) blocks[b] = g;
+    }
+  }
+
+  // Smooth ~160 ms of blocks (8 × 20 ms) — O(blocks), not O(samples)
+  const smoothed = smoothBlocks(blocks, 8);
+
+  for (let i = 0; i < length; i++) {
+    const pos = i / hop;
+    const b0 = Math.min(nBlocks - 1, pos | 0);
+    const b1 = Math.min(nBlocks - 1, b0 + 1);
+    const t = pos - b0;
+    curve[i] = smoothed[b0] * (1 - t) + smoothed[b1] * t;
+  }
+  return curve;
 }
 
 /** Character → recipe multipliers (0–1 scales applied to base moves). */
@@ -239,48 +299,6 @@ export function intensityFromAnalysis(analysis: CharacterAnalysis): number {
     i = Math.max(i, 0.72);
   }
   return Math.max(0.28, Math.min(0.92, i));
-}
-
-function buildSectionGainCurve(
-  length: number,
-  sr: number,
-  sections: SongSection[],
-  arcScale: number
-): Float32Array {
-  const curve = new Float32Array(length);
-  curve.fill(1);
-  if (arcScale < 0.08) return curve;
-
-  if (!sections.length) {
-    // Mild musical swell only — don't over-shape flat structures
-    const mid = length / 2;
-    const half = length * 0.4;
-    for (let i = 0; i < length; i++) {
-      const d = Math.abs(i - mid) / half;
-      const shape = Math.max(0, 1 - d * d);
-      curve[i] = Math.pow(10, (arcScale * 0.9 * shape) / 20);
-    }
-    return smoothCurve(curve, Math.floor(sr * 0.1));
-  }
-
-  const kindDb: Record<string, number> = {
-    intro: -1.0 * arcScale,
-    verse: -0.45 * arcScale,
-    bridge: -0.15 * arcScale,
-    chorus: 1.5 * arcScale,
-    outro: -0.7 * arcScale,
-    custom: 0.25 * arcScale,
-  };
-
-  for (const s of sections) {
-    const start = Math.max(0, Math.floor(s.start * sr));
-    const end = Math.min(length, Math.floor(s.end * sr));
-    const db = kindDb[s.kind] ?? 0;
-    if (Math.abs(db) < 0.04) continue;
-    const g = Math.pow(10, db / 20);
-    for (let i = start; i < end; i++) curve[i] = g;
-  }
-  return smoothCurve(curve, Math.floor(sr * 0.14));
 }
 
 function createBuffer(L: Float32Array, R: Float32Array, sr: number, stereo: boolean): AudioBuffer {
@@ -365,6 +383,7 @@ export async function applySmartEnhance(
 
   const arcScale = recipe.arc * I;
   const gainCurve = buildSectionGainCurve(len, sr, sections, arcScale);
+  await new Promise((r) => setTimeout(r, 0));
   for (let i = 0; i < len; i++) {
     L[i] *= gainCurve[i];
     R[i] *= gainCurve[i];

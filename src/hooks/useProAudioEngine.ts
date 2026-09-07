@@ -49,6 +49,7 @@ import {
   ASSEMBLY_STAGE_LABELS,
 } from '@/lib/assembly-line';
 import { runAudioRepair, defaultRepairSettings, RepairResult } from '@/lib/audio-repair';
+import { encodeBufferToMP3, encodeBufferToWAV } from '@/lib/encode-audio';
 import { MicRecorder, createClickBuffer } from '@/lib/recorder';
 import { saveAudioBuffer, loadAudioBuffer, saveProjectMeta, loadProjectMeta } from '@/lib/project-store';
 
@@ -2061,7 +2062,8 @@ export function useProAudioEngine() {
             message,
           };
           if (assemblyProgressFlushRef.current == null) {
-            assemblyProgressFlushRef.current = window.setTimeout(flushAssemblyProgress, 80);
+            // Flush often so long MP3s don't look "frozen"
+            assemblyProgressFlushRef.current = window.setTimeout(flushAssemblyProgress, 32);
           }
         },
       });
@@ -2089,59 +2091,21 @@ export function useProAudioEngine() {
       setAssemblyResult(result.report);
       setSelectedStemId(processedId);
 
-      // ── Auto-deliver: download mastered file without switching bays ──
+      // ── Auto-deliver: encode the final buffer directly (no Offline re-render) ──
       setAssemblyStage(ASSEMBLY_STAGE_LABELS.deliver);
       setAssemblyMessage('Exporting mastered MP3...');
       setAssemblyProgress(96);
       try {
-        const finalStem: Stem = {
-          id: processedId,
-          name: `${trackName} — Final`,
-          type: 'fullmix',
-          file: null,
-          audioBuffer: result.finalBuffer,
-          processing: cloneStemProcessing(),
-          waveformData: null,
-          peakLevel: 0,
-          rmsLevel: 0,
-          busId: defaultBusIdForStem('fullmix'),
-          sends: defaultSends(),
-        };
-        const blob = await engine.exportMP3(
-          [finalStem],
-          defaultMasterProcessing,
-          result.finalBuffer.duration,
-          320,
-          (p) => {
-            setAssemblyProgress(96 + Math.round(p * 0.03));
-            setAssemblyMessage(`Exporting mastered MP3... ${Math.round(p)}%`);
-          }
-        );
+        const blob = await encodeBufferToMP3(result.finalBuffer, 320, (p) => {
+          setAssemblyProgress(96 + Math.round(p * 0.03));
+          setAssemblyMessage(`Exporting mastered MP3... ${Math.round(p)}%`);
+        });
         downloadBlob(blob, `${trackName}-mastered-320kbps.mp3`);
         setAssemblyMessage('Downloaded · starting playback...');
       } catch (exportErr) {
         console.warn('Auto MP3 export failed, falling back to WAV:', exportErr);
         try {
-          const finalStem: Stem = {
-            id: processedId,
-            name: `${trackName} — Final`,
-            type: 'fullmix',
-            file: null,
-            audioBuffer: result.finalBuffer,
-            processing: cloneStemProcessing(),
-            waveformData: null,
-            peakLevel: 0,
-            rmsLevel: 0,
-            busId: defaultBusIdForStem('fullmix'),
-            sends: defaultSends(),
-          };
-          const wavBlob = await engine.exportStem(
-            finalStem,
-            defaultMasterProcessing,
-            result.finalBuffer.duration,
-            24,
-            'noise-shaped'
-          );
+          const wavBlob = encodeBufferToWAV(result.finalBuffer);
           downloadBlob(wavBlob, `${trackName}-mastered.wav`);
           setAssemblyMessage('Downloaded WAV · starting playback...');
         } catch (wavErr) {

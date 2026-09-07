@@ -188,7 +188,7 @@ export async function runAssemblyLine(
   throwIfAborted(signal);
   onProgress?.(3, 'analyze', 'Analyzing structure and issues...');
   await yieldToUI();
-  const { diagnosis, sections } = analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 10));
+  const { diagnosis, sections } = await analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 10));
   await yieldToUI();
   stageNotes.push({
     stage: 'analyze',

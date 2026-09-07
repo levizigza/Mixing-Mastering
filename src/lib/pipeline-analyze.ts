@@ -287,11 +287,14 @@ export interface PipelineAnalyzeResult {
   sections: SongSection[];
 }
 
-export function analyzePipeline(
+export async function analyzePipeline(
   buffer: AudioBuffer,
   onProgress?: (p: number, m: string) => void
-): PipelineAnalyzeResult {
+): Promise<PipelineAnalyzeResult> {
+  const yieldToUI = () => new Promise<void>((r) => setTimeout(r, 0));
+
   onProgress?.(5, 'Measuring levels...');
+  await yieldToUI();
   const { peak, rms } = getPeakRms(buffer);
   const peakDb = toDb(peak);
   const rmsDb = toDb(rms);
@@ -300,6 +303,7 @@ export function analyzePipeline(
   const estimatedLufs = rmsDb - 0.691;
 
   onProgress?.(20, 'Detecting beat...');
+  await yieldToUI();
   // Beat detection on a short preview — full-song scan freezes the tab
   const previewSec = Math.min(buffer.duration, 45);
   const previewLen = Math.max(1, Math.floor(previewSec * buffer.sampleRate));
@@ -311,11 +315,13 @@ export function analyzePipeline(
   const beat = analyzeBeat(preview);
 
   onProgress?.(40, 'Mapping song structure...');
+  await yieldToUI();
   const windowSeconds = 2;
   const energy = analyzeEnergyContour(buffer, windowSeconds);
   const sections = mergeEnergyToSongSections(energy, buffer.duration, buffer.sampleRate, windowSeconds);
 
   onProgress?.(60, 'Spectral balance...');
+  await yieldToUI();
   const imbalance = stereoImbalanceDb(buffer);
   const { mud, harsh } = bandEnergyRatio(buffer);
 

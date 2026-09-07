@@ -614,7 +614,9 @@ export async function applyMasteringChain(
     const agg = params.multibandAggression * mbScale;
     // Per-band thresholds — light GR (1–3 dB) like pro mastering
     const bandsL = splitBands(L, sr);
+    await new Promise((r) => setTimeout(r, 0));
     const bandsR = splitBands(R, sr);
+    await new Promise((r) => setTimeout(r, 0));
 
     const lowThr = -18 - agg * 4;
     const lowMidThr = -16 - agg * 5;
