@@ -243,6 +243,7 @@ export default function AudioUpload({
 }: AudioUploadProps) {
   const [dragOver, setDragOver] = useState(false);
   const [assemblyDragOver, setAssemblyDragOver] = useState(false);
+  const [assemblyFile, setAssemblyFile] = useState<File | null>(null);
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
   const [showManualStations, setShowManualStations] = useState(false);
@@ -291,33 +292,38 @@ export default function AudioUpload({
     if (id !== 'assembly') setShowManualStations(true);
   };
 
-  const runAssemblyDrop = useCallback(
-    (files: File[]) => {
-      if (!onAssemblyLine || files.length === 0) return;
-      setMode('assembly');
-      onAssemblyLine(files[0]);
-    },
-    [onAssemblyLine]
-  );
+  const queueAssemblyFile = useCallback((files: File[]) => {
+    const audio = files.find(isAudioFile);
+    if (!audio) return;
+    setAssemblyFile(audio);
+    setMode('assembly');
+  }, []);
 
   const handleAssemblyDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setAssemblyDragOver(false);
-      const files = Array.from(e.dataTransfer.files).filter(isAudioFile);
-      runAssemblyDrop(files);
+      queueAssemblyFile(Array.from(e.dataTransfer.files));
     },
-    [runAssemblyDrop]
+    [queueAssemblyFile]
   );
 
   const handleAssemblyFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files || []).filter(isAudioFile);
-      runAssemblyDrop(files);
+      queueAssemblyFile(Array.from(e.target.files || []));
       e.target.value = '';
     },
-    [runAssemblyDrop]
+    [queueAssemblyFile]
   );
+
+  const startAssemblyLine = useCallback(() => {
+    if (!assemblyFile || !onAssemblyLine || isAssemblyLine) return;
+    onAssemblyLine(assemblyFile);
+  }, [assemblyFile, onAssemblyLine, isAssemblyLine]);
+
+  const clearAssemblyFile = useCallback(() => {
+    setAssemblyFile(null);
+  }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -389,7 +395,7 @@ export default function AudioUpload({
               FULL AUTO ASSEMBLY LINE
             </p>
             <p className="text-[9px] text-studio-muted font-mono truncate">
-              Drop once → analyze → repair → correct → level → master → download
+              1. Drop MP3 · 2. Press Start · auto master + download
             </p>
           </div>
           <span
@@ -400,7 +406,7 @@ export default function AudioUpload({
               background: `${assemblyTheme.color}18`,
             }}
           >
-            1-CLICK
+            DROP + START
           </span>
         </div>
 
@@ -425,16 +431,63 @@ export default function AudioUpload({
               )}
             </>
           ) : (
-            <DropZone
-              dragOver={assemblyDragOver}
-              setDragOver={setAssemblyDragOver}
-              onDrop={handleAssemblyDrop}
-              onFileInput={handleAssemblyFileInput}
-              color={assemblyTheme.color}
-              icon={<Factory size={20} />}
-              title="Drop any finished mix"
-              subtitle="Hands-off · exits as mastered MP3"
-            />
+            <>
+              <DropZone
+                dragOver={assemblyDragOver}
+                setDragOver={setAssemblyDragOver}
+                onDrop={handleAssemblyDrop}
+                onFileInput={handleAssemblyFileInput}
+                color={assemblyTheme.color}
+                icon={<Upload size={20} />}
+                title={assemblyFile ? 'Replace audio file' : 'Drop MP3 / WAV here'}
+                subtitle={assemblyFile ? 'Click or drop to choose a different file' : 'MP3 · WAV · FLAC · M4A'}
+              />
+
+              {assemblyFile ? (
+                <div
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-md border"
+                  style={{
+                    borderColor: `${assemblyTheme.color}44`,
+                    background: assemblyTheme.glow,
+                  }}
+                >
+                  <Music size={14} style={{ color: assemblyTheme.color }} className="shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-mono text-studio-text truncate">{assemblyFile.name}</p>
+                    <p className="text-[8px] font-mono text-studio-muted">
+                      {(assemblyFile.size / (1024 * 1024)).toFixed(1)} MB · ready
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearAssemblyFile}
+                    className="text-[8px] font-mono px-1.5 py-1 rounded border border-white/10 text-studio-muted hover:text-studio-text hover:bg-white/5 shrink-0"
+                  >
+                    CLEAR
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[9px] font-mono text-studio-muted text-center">
+                  No file selected yet
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={startAssemblyLine}
+                disabled={!assemblyFile || !onAssemblyLine}
+                className="w-full py-3 rounded-md text-[12px] font-display tracking-[0.16em] disabled:opacity-35 disabled:cursor-not-allowed transition-all"
+                style={{
+                  background: assemblyFile
+                    ? `linear-gradient(180deg, ${assemblyTheme.color}, color-mix(in srgb, ${assemblyTheme.color} 65%, #000))`
+                    : '#1a1a22',
+                  color: assemblyFile ? '#0a0a0c' : '#6b7280',
+                  boxShadow: assemblyFile ? `0 0 18px ${assemblyTheme.glow}` : undefined,
+                }}
+              >
+                START ASSEMBLY LINE
+              </button>
+            </>
           )}
         </div>
       </div>

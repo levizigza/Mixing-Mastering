@@ -635,9 +635,9 @@ export default function StudioPage() {
                       READY FOR FULL AUTO
                     </p>
                     <p className="text-[11px] text-studio-muted leading-relaxed">
-                      Drop a mix into the{' '}
+                      Drop an MP3 into the{' '}
                       <span style={{ color: activeTheme.color }}>Full Auto Assembly Line</span>
-                      {' '}on the left. It runs analyze → repair → correct → level → master → download — no switching needed.
+                      {' '}on the left, then press <span className="text-studio-text">Start</span>. It runs the full pipeline and downloads the mastered file.
                     </p>
                     <div className="flex flex-wrap justify-center gap-1.5 pt-1">
                       {Object.values(STATION_THEMES).map((s) => (
