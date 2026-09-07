@@ -20,6 +20,7 @@ const STAGE_ORDER: AssemblyStageId[] = [
   'repair',
   'fix',
   'level',
+  'tune',
   'hit',
   'master',
   'deliver',
@@ -93,7 +94,7 @@ export default function AssemblyLineReport({
           </div>
 
           <p className="text-[9px] text-emerald-300/80 font-mono">
-            Mastered MP3 auto-downloaded · Final track is playing
+            24-bit WAV + MP3 auto-downloaded · Final track is playing
           </p>
 
           {result.diagnosis.issues.length > 0 && (

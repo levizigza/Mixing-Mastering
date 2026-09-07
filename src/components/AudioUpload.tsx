@@ -36,7 +36,7 @@ interface AudioUploadProps {
   onAutotune?: (file: File, intensity: number) => void;
   onVocalFix?: (file: File) => void;
   onRepair?: (file: File) => void;
-  onAssemblyLine?: (file: File, opts?: { hitMaker?: boolean }) => void;
+  onAssemblyLine?: (file: File, opts?: { hitMaker?: boolean; studioTune?: boolean }) => void;
   onCancelAssemblyLine?: () => void;
   onStationChange?: (station: StationId) => void;
   existingStems: string[];
@@ -246,6 +246,7 @@ export default function AudioUpload({
   const [assemblyDragOver, setAssemblyDragOver] = useState(false);
   const [assemblyFile, setAssemblyFile] = useState<File | null>(null);
   const [hitMakerEnabled, setHitMakerEnabled] = useState(true);
+  const [studioTuneEnabled, setStudioTuneEnabled] = useState(true);
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
   const [showManualStations, setShowManualStations] = useState(false);
@@ -320,8 +321,11 @@ export default function AudioUpload({
 
   const startAssemblyLine = useCallback(() => {
     if (!assemblyFile || !onAssemblyLine || isAssemblyLine) return;
-    onAssemblyLine(assemblyFile, { hitMaker: hitMakerEnabled });
-  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled]);
+    onAssemblyLine(assemblyFile, {
+      hitMaker: hitMakerEnabled,
+      studioTune: studioTuneEnabled,
+    });
+  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled]);
 
   const clearAssemblyFile = useCallback(() => {
     setAssemblyFile(null);
@@ -397,7 +401,7 @@ export default function AudioUpload({
               FULL AUTO ASSEMBLY LINE
             </p>
             <p className="text-[9px] text-studio-muted font-mono truncate">
-              1. Drop MP3 · 2. Smart Enhance · 3. Press Start
+              1. Drop MP3 · 2. Studio Tune + Enhance · 3. Press Start
             </p>
           </div>
           <span
@@ -476,6 +480,46 @@ export default function AudioUpload({
 
               <button
                 type="button"
+                onClick={() => setStudioTuneEnabled((v) => !v)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md border transition-all text-left"
+                style={
+                  studioTuneEnabled
+                    ? {
+                        borderColor: '#a78bfa66',
+                        background: 'rgba(167, 139, 250, 0.12)',
+                      }
+                    : { borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.25)' }
+                }
+              >
+                <Mic
+                  size={14}
+                  className="shrink-0"
+                  style={{ color: studioTuneEnabled ? '#a78bfa' : '#6b7280' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="text-[10px] font-display tracking-wider"
+                    style={{ color: studioTuneEnabled ? '#c4b5fd' : '#9ca3af' }}
+                  >
+                    STUDIO TUNE {studioTuneEnabled ? 'ON' : 'OFF'}
+                  </p>
+                  <p className="text-[8px] font-mono text-studio-muted leading-snug">
+                    Natural pitch polish — keeps vibrato, not T-Pain
+                  </p>
+                </div>
+                <span
+                  className="text-[8px] font-mono px-1.5 py-0.5 rounded border shrink-0"
+                  style={{
+                    color: studioTuneEnabled ? '#c4b5fd' : '#6b7280',
+                    borderColor: studioTuneEnabled ? '#a78bfa55' : 'rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {studioTuneEnabled ? 'NATURAL' : 'OFF'}
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setHitMakerEnabled((v) => !v)}
                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md border transition-all text-left"
                 style={
@@ -527,7 +571,7 @@ export default function AudioUpload({
                   boxShadow: assemblyFile ? `0 0 18px ${assemblyTheme.glow}` : undefined,
                 }}
               >
-                {hitMakerEnabled ? 'START SMART PIPELINE' : 'START ASSEMBLY LINE'}
+                START FULL PIPELINE
               </button>
             </>
           )}

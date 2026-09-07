@@ -8,6 +8,7 @@ import { analyzeAndMasterTrack } from '@/lib/auto-mix';
 import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
 import { applySmartEnhance, smartEnhanceMasteringBoost } from '@/lib/hit-maker';
+import { runAutotuneStation } from '@/lib/autotune-station';
 import type { SonicCharacter } from '@/lib/sonic-character';
 
 export type AssemblyStageId =
@@ -15,6 +16,7 @@ export type AssemblyStageId =
   | 'repair'
   | 'fix'
   | 'level'
+  | 'tune'
   | 'hit'
   | 'master'
   | 'deliver'
@@ -25,11 +27,15 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   repair: 'Repair',
   fix: 'Correct',
   level: 'Level',
+  tune: 'Studio Tune',
   hit: 'Smart Enhance',
   master: 'Master',
   deliver: 'Deliver',
   done: 'Done',
 };
+
+/** Natural/Studio Auto-Tune intensity for the full pipeline (not T-Pain). */
+const ASSEMBLY_STUDIO_TUNE_INTENSITY = 28;
 
 export interface AssemblyStageNote {
   stage: AssemblyStageId;
@@ -63,6 +69,91 @@ export interface AssemblyLineOptions {
   /** Analysis-driven adaptive polish (genre/vibe aware) */
   hitMaker?: boolean;
   hitMakerIntensity?: number;
+  /**
+   * Natural studio pitch polish (default true).
+   * Transparent Retune-style correction — not hard / T-Pain Auto-Tune.
+   */
+  studioTune?: boolean;
+}
+
+function createMonoBuffer(data: Float32Array, sampleRate: number): AudioBuffer {
+  const ctx = new OfflineAudioContext(1, data.length, sampleRate);
+  const buf = ctx.createBuffer(1, data.length, sampleRate);
+  buf.copyToChannel(new Float32Array(data), 0);
+  return buf;
+}
+
+function createStereoBuffer(L: Float32Array, R: Float32Array, sampleRate: number): AudioBuffer {
+  const ctx = new OfflineAudioContext(2, L.length, sampleRate);
+  const buf = ctx.createBuffer(2, L.length, sampleRate);
+  buf.copyToChannel(new Float32Array(L), 0);
+  buf.copyToChannel(new Float32Array(R), 1);
+  return buf;
+}
+
+/**
+ * Studio pitch polish for full mixes: correct the mid (center) channel where
+ * vocals live, leave sides alone so stereo instruments keep their width.
+ * Intensity stays in the Natural→Studio range — vibrato & slides preserved.
+ */
+async function applyAssemblyStudioTune(
+  buffer: AudioBuffer,
+  onProgress?: (p: number, m: string) => void
+): Promise<{ buffer: AudioBuffer; notes: string[] }> {
+  const wet = 0.82; // slight dry blend keeps full-mix natural
+
+  if (buffer.numberOfChannels < 2) {
+    const result = await runAutotuneStation(buffer, ASSEMBLY_STUDIO_TUNE_INTENSITY, onProgress);
+    return {
+      buffer: result.buffer,
+      notes: [
+        ...result.notes,
+        'Studio Tune: natural pitch polish (mono).',
+      ],
+    };
+  }
+
+  onProgress?.(4, 'Studio Tune: splitting mid / side...');
+  await yieldToUI();
+
+  const L = buffer.getChannelData(0);
+  const R = buffer.getChannelData(1);
+  const len = buffer.length;
+  const mid = new Float32Array(len);
+  const side = new Float32Array(len);
+  for (let i = 0; i < len; i++) {
+    mid[i] = (L[i] + R[i]) * 0.5;
+    side[i] = (L[i] - R[i]) * 0.5;
+  }
+
+  const midBuf = createMonoBuffer(mid, buffer.sampleRate);
+  const result = await runAutotuneStation(
+    midBuf,
+    ASSEMBLY_STUDIO_TUNE_INTENSITY,
+    (p, m) => onProgress?.(8 + Math.round(p * 0.86), m)
+  );
+
+  onProgress?.(96, 'Studio Tune: blending center...');
+  await yieldToUI();
+
+  const tunedMid = result.buffer.getChannelData(0);
+  const outL = new Float32Array(len);
+  const outR = new Float32Array(len);
+  const dry = 1 - wet;
+  for (let i = 0; i < len; i++) {
+    const m = mid[i] * dry + tunedMid[i] * wet;
+    outL[i] = m + side[i];
+    outR[i] = m - side[i];
+  }
+
+  return {
+    buffer: createStereoBuffer(outL, outR, buffer.sampleRate),
+    notes: [
+      ...result.notes,
+      'Center-channel studio pitch (sides preserved).',
+      'Natural/Studio intensity — vibrato & slides kept, not hard Auto-Tune.',
+    ],
+  };
 }
 
 function throwIfAborted(signal?: AbortSignal) {
@@ -180,7 +271,7 @@ export async function runAssemblyLine(
     signal,
     targetLUFS = -14,
     hitMaker = true,
-    hitMakerIntensity = 0.75,
+    studioTune = true,
   } = options;
   const stageNotes: AssemblyStageNote[] = [];
 
@@ -188,7 +279,7 @@ export async function runAssemblyLine(
   throwIfAborted(signal);
   onProgress?.(3, 'analyze', 'Analyzing structure and issues...');
   await yieldToUI();
-  const { diagnosis, sections } = await analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 10));
+  const { diagnosis, sections } = await analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 8));
   await yieldToUI();
   stageNotes.push({
     stage: 'analyze',
@@ -202,13 +293,13 @@ export async function runAssemblyLine(
 
   // ── 2. Repair on the stereo mix ──────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(14, 'repair', 'Cleanup bay...');
+  onProgress?.(12, 'repair', 'Cleanup bay...');
   await yieldToUI();
   const repairSettings = repairFromDiagnosis(diagnosis);
   const repaired = await runAudioRepair(
     buffer,
     repairSettings,
-    mapProgress(onProgress, 'repair', 14, 14)
+    mapProgress(onProgress, 'repair', 12, 10)
   );
   await yieldToUI();
   stageNotes.push({
@@ -219,12 +310,12 @@ export async function runAssemblyLine(
 
   // ── 3. Corrective EQ from diagnosis ──────────────────────────
   throwIfAborted(signal);
-  onProgress?.(30, 'fix', 'Fixing problem bands...');
+  onProgress?.(24, 'fix', 'Fixing problem bands...');
   await yieldToUI();
   const corrected = await applyCorrectiveEq(
     repaired.buffer,
     diagnosis,
-    mapProgress(onProgress, 'fix', 30, 10)
+    mapProgress(onProgress, 'fix', 24, 8)
   );
   await yieldToUI();
   stageNotes.push({
@@ -235,7 +326,7 @@ export async function runAssemblyLine(
 
   // ── 4. Level ─────────────────────────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(42, 'level', 'Gain staging...');
+  onProgress?.(34, 'level', 'Gain staging...');
   await yieldToUI();
   const levelMode =
     hasIssue(diagnosis.issues, 'loudness', 'medium') && diagnosis.estimatedLufs > -11
@@ -246,7 +337,7 @@ export async function runAssemblyLine(
   const leveled = await autoLevelTrack(
     corrected.buffer,
     { mode: levelMode },
-    mapProgress(onProgress, 'level', 42, 10)
+    mapProgress(onProgress, 'level', 34, 8)
   );
   await yieldToUI();
   stageNotes.push({
@@ -258,18 +349,43 @@ export async function runAssemblyLine(
     ],
   });
 
-  // ── 5. Smart Enhance (adaptive polish) ───────────────────────
-  let masterInput = leveled.buffer;
+  // ── 5. Studio Tune (natural pitch polish) ────────────────────
+  let afterTune = leveled.buffer;
+  if (studioTune) {
+    throwIfAborted(signal);
+    onProgress?.(44, 'tune', 'Studio Tune — natural pitch polish...');
+    await yieldToUI();
+    const tuned = await applyAssemblyStudioTune(
+      leveled.buffer,
+      mapProgress(onProgress, 'tune', 44, 12)
+    );
+    afterTune = tuned.buffer;
+    await yieldToUI();
+    stageNotes.push({
+      stage: 'tune',
+      label: ASSEMBLY_STAGE_LABELS.tune,
+      notes: tuned.notes,
+    });
+  } else {
+    stageNotes.push({
+      stage: 'tune',
+      label: ASSEMBLY_STAGE_LABELS.tune,
+      notes: ['Studio Tune skipped.'],
+    });
+  }
+
+  // ── 6. Smart Enhance (adaptive polish) ───────────────────────
+  let masterInput = afterTune;
   let enhanceCharacter: SonicCharacter | null = null;
   let enhanceIntensity = 0.5;
 
   if (hitMaker) {
     throwIfAborted(signal);
-    onProgress?.(54, 'hit', 'Smart Enhance — adapting to the track...');
+    onProgress?.(58, 'hit', 'Smart Enhance — adapting to the track...');
     await yieldToUI();
-    const enhanced = await applySmartEnhance(leveled.buffer, sections, diagnosis, {
+    const enhanced = await applySmartEnhance(afterTune, sections, diagnosis, {
       // Omit intensity so enhance derives it from analysis (ballad vs banger)
-      onProgress: mapProgress(onProgress, 'hit', 54, 12),
+      onProgress: mapProgress(onProgress, 'hit', 58, 10),
     });
     masterInput = enhanced.buffer;
     enhanceCharacter = enhanced.character;
@@ -287,14 +403,14 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 6. Master (stereo — no heuristic stem remaster) ──────────
+  // ── 7. Master (stereo — no heuristic stem remaster) ──────────
   throwIfAborted(signal);
-  onProgress?.(68, 'master', 'Analyzing for master...');
+  onProgress?.(70, 'master', 'Analyzing for master...');
   await yieldToUI();
-  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 68, 5));
+  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 70, 4));
   await yieldToUI();
 
-  onProgress?.(74, 'master', 'Sonic character...');
+  onProgress?.(75, 'master', 'Sonic character...');
   await yieldToUI();
   const character = detectSonicCharacter(masterInput);
   const profile = getProcessingProfile(character.character, character.traits);
@@ -367,13 +483,21 @@ export async function runAssemblyLine(
     label: ASSEMBLY_STAGE_LABELS.deliver,
     notes: ['Final master ready for download and playback.'],
   });
+  const pathBits = [
+    'analyze',
+    'repair',
+    'correct',
+    'level',
+    studioTune ? 'studio tune' : null,
+    hitMaker ? 'enhance' : null,
+    'master',
+    'deliver',
+  ].filter(Boolean);
   stageNotes.push({
     stage: 'done',
     label: ASSEMBLY_STAGE_LABELS.done,
     notes: [
-      hitMaker
-        ? 'Full auto + Smart Enhance: analyze → repair → correct → level → enhance → master → deliver.'
-        : 'Full auto: analyze → repair → correct → level → master → deliver.',
+      `Full auto: ${pathBits.join(' → ')}.`,
       'Original muted · Final unmuted — use Swap A/B to compare.',
     ],
   });
