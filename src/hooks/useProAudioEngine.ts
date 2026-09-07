@@ -2027,10 +2027,12 @@ export function useProAudioEngine() {
     setAssemblyMessage(pending.message);
   }, []);
 
-  const runAssemblyLineStation = useCallback(async (file: File) => {
+  const runAssemblyLineStation = useCallback(async (file: File, opts?: { hitMaker?: boolean }) => {
     assemblyAbortRef.current?.abort();
     const ac = new AbortController();
     assemblyAbortRef.current = ac;
+
+    const useHitMaker = opts?.hitMaker !== false;
 
     setIsAssemblyLine(true);
     setAssemblyProgress(0);
@@ -2051,6 +2053,7 @@ export function useProAudioEngine() {
       const result = await runAssemblyLine(buffer, {
         trackName,
         signal: ac.signal,
+        hitMaker: useHitMaker,
         onProgress: (pct, stageId: AssemblyStageId, message) => {
           assemblyProgressPendingRef.current = {
             pct,

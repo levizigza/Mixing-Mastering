@@ -17,6 +17,7 @@ import {
   Wrench,
   Package,
   Factory,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { StemType } from '@/types/audio';
@@ -35,7 +36,7 @@ interface AudioUploadProps {
   onAutotune?: (file: File, intensity: number) => void;
   onVocalFix?: (file: File) => void;
   onRepair?: (file: File) => void;
-  onAssemblyLine?: (file: File) => void;
+  onAssemblyLine?: (file: File, opts?: { hitMaker?: boolean }) => void;
   onCancelAssemblyLine?: () => void;
   onStationChange?: (station: StationId) => void;
   existingStems: string[];
@@ -244,6 +245,7 @@ export default function AudioUpload({
   const [dragOver, setDragOver] = useState(false);
   const [assemblyDragOver, setAssemblyDragOver] = useState(false);
   const [assemblyFile, setAssemblyFile] = useState<File | null>(null);
+  const [hitMakerEnabled, setHitMakerEnabled] = useState(true);
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
   const [showManualStations, setShowManualStations] = useState(false);
@@ -318,8 +320,8 @@ export default function AudioUpload({
 
   const startAssemblyLine = useCallback(() => {
     if (!assemblyFile || !onAssemblyLine || isAssemblyLine) return;
-    onAssemblyLine(assemblyFile);
-  }, [assemblyFile, onAssemblyLine, isAssemblyLine]);
+    onAssemblyLine(assemblyFile, { hitMaker: hitMakerEnabled });
+  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled]);
 
   const clearAssemblyFile = useCallback(() => {
     setAssemblyFile(null);
@@ -395,7 +397,7 @@ export default function AudioUpload({
               FULL AUTO ASSEMBLY LINE
             </p>
             <p className="text-[9px] text-studio-muted font-mono truncate">
-              1. Drop MP3 · 2. Press Start · auto master + download
+              1. Drop MP3 · 2. Smart Enhance · 3. Press Start
             </p>
           </div>
           <span
@@ -474,6 +476,46 @@ export default function AudioUpload({
 
               <button
                 type="button"
+                onClick={() => setHitMakerEnabled((v) => !v)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md border transition-all text-left"
+                style={
+                  hitMakerEnabled
+                    ? {
+                        borderColor: '#38bdf866',
+                        background: 'rgba(56, 189, 248, 0.12)',
+                      }
+                    : { borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.25)' }
+                }
+              >
+                <Sparkles
+                  size={14}
+                  className="shrink-0"
+                  style={{ color: hitMakerEnabled ? '#38bdf8' : '#6b7280' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="text-[10px] font-display tracking-wider"
+                    style={{ color: hitMakerEnabled ? '#7dd3fc' : '#9ca3af' }}
+                  >
+                    SMART ENHANCE {hitMakerEnabled ? 'ON' : 'OFF'}
+                  </p>
+                  <p className="text-[8px] font-mono text-studio-muted leading-snug">
+                    Analyzes vibe · adapts polish (gentle ballad → punchy hit)
+                  </p>
+                </div>
+                <span
+                  className="text-[8px] font-mono px-1.5 py-0.5 rounded border shrink-0"
+                  style={{
+                    color: hitMakerEnabled ? '#7dd3fc' : '#6b7280',
+                    borderColor: hitMakerEnabled ? '#38bdf855' : 'rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {hitMakerEnabled ? 'AUTO' : 'OFF'}
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={startAssemblyLine}
                 disabled={!assemblyFile || !onAssemblyLine}
                 className="w-full py-3 rounded-md text-[12px] font-display tracking-[0.16em] disabled:opacity-35 disabled:cursor-not-allowed transition-all"
@@ -485,7 +527,7 @@ export default function AudioUpload({
                   boxShadow: assemblyFile ? `0 0 18px ${assemblyTheme.glow}` : undefined,
                 }}
               >
-                START ASSEMBLY LINE
+                {hitMakerEnabled ? 'START SMART PIPELINE' : 'START ASSEMBLY LINE'}
               </button>
             </>
           )}

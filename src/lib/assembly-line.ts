@@ -7,12 +7,15 @@ import { autoLevelTrack } from '@/lib/audio-leveler';
 import { analyzeAndMasterTrack } from '@/lib/auto-mix';
 import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
+import { applySmartEnhance, smartEnhanceMasteringBoost } from '@/lib/hit-maker';
+import type { SonicCharacter } from '@/lib/sonic-character';
 
 export type AssemblyStageId =
   | 'analyze'
   | 'repair'
   | 'fix'
   | 'level'
+  | 'hit'
   | 'master'
   | 'deliver'
   | 'done';
@@ -22,6 +25,7 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   repair: 'Repair',
   fix: 'Correct',
   level: 'Level',
+  hit: 'Smart Enhance',
   master: 'Master',
   deliver: 'Deliver',
   done: 'Done',
@@ -56,6 +60,9 @@ export interface AssemblyLineOptions {
   signal?: AbortSignal;
   trackName?: string;
   targetLUFS?: number;
+  /** Analysis-driven adaptive polish (genre/vibe aware) */
+  hitMaker?: boolean;
+  hitMakerIntensity?: number;
 }
 
 function throwIfAborted(signal?: AbortSignal) {
@@ -168,14 +175,20 @@ export async function runAssemblyLine(
   buffer: AudioBuffer,
   options: AssemblyLineOptions = {}
 ): Promise<AssemblyLineResult> {
-  const { onProgress, signal, targetLUFS = -14 } = options;
+  const {
+    onProgress,
+    signal,
+    targetLUFS = -14,
+    hitMaker = true,
+    hitMakerIntensity = 0.75,
+  } = options;
   const stageNotes: AssemblyStageNote[] = [];
 
   // ── 1. Analyze ───────────────────────────────────────────────
   throwIfAborted(signal);
   onProgress?.(3, 'analyze', 'Analyzing structure and issues...');
   await yieldToUI();
-  const { diagnosis, sections } = analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 12));
+  const { diagnosis, sections } = analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 10));
   await yieldToUI();
   stageNotes.push({
     stage: 'analyze',
@@ -189,13 +202,13 @@ export async function runAssemblyLine(
 
   // ── 2. Repair on the stereo mix ──────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(16, 'repair', 'Cleanup bay...');
+  onProgress?.(14, 'repair', 'Cleanup bay...');
   await yieldToUI();
   const repairSettings = repairFromDiagnosis(diagnosis);
   const repaired = await runAudioRepair(
     buffer,
     repairSettings,
-    mapProgress(onProgress, 'repair', 16, 18)
+    mapProgress(onProgress, 'repair', 14, 14)
   );
   await yieldToUI();
   stageNotes.push({
@@ -206,12 +219,12 @@ export async function runAssemblyLine(
 
   // ── 3. Corrective EQ from diagnosis ──────────────────────────
   throwIfAborted(signal);
-  onProgress?.(36, 'fix', 'Fixing problem bands...');
+  onProgress?.(30, 'fix', 'Fixing problem bands...');
   await yieldToUI();
   const corrected = await applyCorrectiveEq(
     repaired.buffer,
     diagnosis,
-    mapProgress(onProgress, 'fix', 36, 14)
+    mapProgress(onProgress, 'fix', 30, 10)
   );
   await yieldToUI();
   stageNotes.push({
@@ -222,9 +235,8 @@ export async function runAssemblyLine(
 
   // ── 4. Level ─────────────────────────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(52, 'level', 'Gain staging...');
+  onProgress?.(42, 'level', 'Gain staging...');
   await yieldToUI();
-  // Quiet tracks → loudness mode; hot tracks → mix headroom
   const levelMode =
     hasIssue(diagnosis.issues, 'loudness', 'medium') && diagnosis.estimatedLufs > -11
       ? 'mix'
@@ -234,7 +246,7 @@ export async function runAssemblyLine(
   const leveled = await autoLevelTrack(
     corrected.buffer,
     { mode: levelMode },
-    mapProgress(onProgress, 'level', 52, 12)
+    mapProgress(onProgress, 'level', 42, 10)
   );
   await yieldToUI();
   stageNotes.push({
@@ -246,12 +258,40 @@ export async function runAssemblyLine(
     ],
   });
 
-  // ── 5. Master (stereo — no heuristic stem remaster) ──────────
+  // ── 5. Smart Enhance (adaptive polish) ───────────────────────
+  let masterInput = leveled.buffer;
+  let enhanceCharacter: SonicCharacter | null = null;
+  let enhanceIntensity = 0.5;
+
+  if (hitMaker) {
+    throwIfAborted(signal);
+    onProgress?.(54, 'hit', 'Smart Enhance — adapting to the track...');
+    await yieldToUI();
+    const enhanced = await applySmartEnhance(leveled.buffer, sections, diagnosis, {
+      // Omit intensity so enhance derives it from analysis (ballad vs banger)
+      onProgress: mapProgress(onProgress, 'hit', 54, 12),
+    });
+    masterInput = enhanced.buffer;
+    enhanceCharacter = enhanced.character;
+    enhanceIntensity = enhanced.intensity;
+    stageNotes.push({
+      stage: 'hit',
+      label: ASSEMBLY_STAGE_LABELS.hit,
+      notes: enhanced.notes,
+    });
+  } else {
+    stageNotes.push({
+      stage: 'hit',
+      label: ASSEMBLY_STAGE_LABELS.hit,
+      notes: ['Smart Enhance skipped — transparent path only.'],
+    });
+  }
+
+  // ── 6. Master (stereo — no heuristic stem remaster) ──────────
   throwIfAborted(signal);
-  onProgress?.(66, 'master', 'Analyzing for master...');
+  onProgress?.(68, 'master', 'Analyzing for master...');
   await yieldToUI();
-  const masterInput = leveled.buffer;
-  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 66, 6));
+  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 68, 5));
   await yieldToUI();
 
   onProgress?.(74, 'master', 'Sonic character...');
@@ -260,15 +300,26 @@ export async function runAssemblyLine(
   const profile = getProcessingProfile(character.character, character.traits);
 
   let masterTarget = profile.masteringApproach.targetLUFS ?? targetLUFS;
+  if (hitMaker && enhanceCharacter) {
+    // Soft vibes stay near streaming norm; energetic vibes go more competitive
+    const soft =
+      enhanceCharacter === 'minimal' ||
+      enhanceCharacter === 'moody' ||
+      enhanceCharacter === 'atmospheric' ||
+      enhanceCharacter === 'soulful';
+    masterTarget = soft ? Math.min(masterTarget, -13) : Math.min(masterTarget, -11.5);
+  }
   if (hasIssue(diagnosis.issues, 'loudness', 'medium') && diagnosis.estimatedLufs > -11) {
-    // Already loud — aim softer / less aggressive
     masterTarget = Math.min(masterTarget, -13);
   }
   if (diagnosis.estimatedLufs < -18) {
-    masterTarget = Math.max(masterTarget, -14);
+    masterTarget = Math.max(masterTarget, hitMaker ? -12.5 : -14);
   }
 
-  const approach = { ...profile.masteringApproach, targetLUFS: masterTarget };
+  let approach = { ...profile.masteringApproach, targetLUFS: masterTarget };
+  if (hitMaker && enhanceCharacter) {
+    approach = smartEnhanceMasteringBoost(approach, enhanceCharacter, enhanceIntensity);
+  }
   if (hasIssue(diagnosis.issues, 'lowDynamics', 'high')) {
     approach.multibandAggression *= 0.45;
     approach.busCompGlue *= 0.4;
@@ -289,7 +340,7 @@ export async function runAssemblyLine(
     masterInput,
     trackAnalysis.analysis,
     masterTarget,
-    mapProgress(onProgress, 'master', 80, 18),
+    mapProgress(onProgress, 'master', 80, 16),
     approach
   );
   await yieldToUI();
@@ -300,7 +351,10 @@ export async function runAssemblyLine(
     notes: [
       `Character: ${character.character} (${Math.round(character.confidence * 100)}%)`,
       `Target ${masterTarget} LUFS → final ${masteringStats.finalLUFS.toFixed(1)} · TP ${masteringStats.truePeak.toFixed(1)} dBTP`,
-      ...trackAnalysis.recommendations.map((r) => r.description).slice(0, 5),
+      hitMaker
+        ? `Smart Enhance mastering (${enhanceCharacter ?? 'adaptive'} · intensity ${Math.round(enhanceIntensity * 100)}%)`
+        : 'Transparent mastering profile',
+      ...trackAnalysis.recommendations.map((r) => r.description).slice(0, 4),
     ],
   });
 
@@ -317,7 +371,9 @@ export async function runAssemblyLine(
     stage: 'done',
     label: ASSEMBLY_STAGE_LABELS.done,
     notes: [
-      'Full auto: analyze → repair → correct → level → master → deliver.',
+      hitMaker
+        ? 'Full auto + Smart Enhance: analyze → repair → correct → level → enhance → master → deliver.'
+        : 'Full auto: analyze → repair → correct → level → master → deliver.',
       'Original muted · Final unmuted — use Swap A/B to compare.',
     ],
   });

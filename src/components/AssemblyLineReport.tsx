@@ -20,6 +20,7 @@ const STAGE_ORDER: AssemblyStageId[] = [
   'repair',
   'fix',
   'level',
+  'hit',
   'master',
   'deliver',
   'done',
