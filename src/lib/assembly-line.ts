@@ -4,7 +4,7 @@ import { SongSection } from '@/types/audio';
 import { analyzePipeline, PipelineDiagnosis, PipelineIssue } from '@/lib/pipeline-analyze';
 import { runAudioRepair, RepairSettings } from '@/lib/audio-repair';
 import { autoLevelTrack } from '@/lib/audio-leveler';
-import { analyzeAndMasterTrack } from '@/lib/auto-mix';
+import { analyzeAndMasterTrack, autoMixAndMaster } from '@/lib/auto-mix';
 import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
 import { applySmartEnhance, smartEnhanceMasteringBoost } from '@/lib/hit-maker';
@@ -12,6 +12,8 @@ import { runAutotuneStation } from '@/lib/autotune-station';
 import { applyResonanceCleanup } from '@/lib/resonance-eq';
 import { applyVocalPocket } from '@/lib/vocal-pocket';
 import { getStreamingTarget, StreamingPlatformId } from '@/lib/streaming-targets';
+import { separateStems } from '@/lib/stem-separator';
+import { bounceOfflineMix, stemsFromSeparated } from '@/lib/offline-mix-bounce';
 import type { SonicCharacter } from '@/lib/sonic-character';
 
 export type AssemblyStageId =
@@ -20,6 +22,7 @@ export type AssemblyStageId =
   | 'resonance'
   | 'fix'
   | 'level'
+  | 'balance'
   | 'pocket'
   | 'tune'
   | 'hit'
@@ -33,6 +36,7 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   resonance: 'Resonance',
   fix: 'Correct',
   level: 'Level',
+  balance: 'Stem Balance',
   pocket: 'Vocal Pocket',
   tune: 'Studio Tune',
   hit: 'Smart Enhance',
@@ -91,6 +95,11 @@ export interface AssemblyLineOptions {
   resonanceCleanup?: boolean;
   /** Center vocal ride + pocket carve (default true) */
   vocalPocket?: boolean;
+  /**
+   * Optional multi-stem auto-balance (default false — heavier path).
+   * Separate → Auto Mix gain/EQ carve → offline bounce, then continue the chain.
+   */
+  stemBalance?: boolean;
 }
 
 function createMonoBuffer(data: Float32Array, sampleRate: number): AudioBuffer {
@@ -279,6 +288,63 @@ async function applyCorrectiveEq(
   return { buffer: out, notes };
 }
 
+/**
+ * Optional multi-stem path: DSP separate → Auto Mix balance → offline bounce.
+ * Uses the existing Auto Mix / stem-separator / bounce stack — no new mixer.
+ */
+async function applyStemAutoBalance(
+  buffer: AudioBuffer,
+  trackName: string,
+  onProgress?: (p: number, m: string) => void,
+  signal?: AbortSignal
+): Promise<{ buffer: AudioBuffer; notes: string[] }> {
+  throwIfAborted(signal);
+  onProgress?.(2, 'Separating vocals / drums / bass / instruments...');
+  await yieldToUI();
+
+  const separated = await separateStems(buffer, (p, m) => {
+    onProgress?.(2 + Math.round(p * 0.45), m);
+  });
+  throwIfAborted(signal);
+  await yieldToUI();
+
+  onProgress?.(50, 'Auto Mix — gain staging & frequency carving...');
+  await yieldToUI();
+  const stems = stemsFromSeparated(separated, trackName || 'Track');
+  const mix = autoMixAndMaster(stems, (p, m) => {
+    onProgress?.(50 + Math.round(p * 0.2), m);
+  });
+  throwIfAborted(signal);
+  await yieldToUI();
+
+  onProgress?.(72, 'Bouncing balanced stems to stereo...');
+  const bounced = await bounceOfflineMix(
+    stems,
+    mix.stemSettings,
+    (p, m) => onProgress?.(72 + Math.round(p * 0.26), m)
+  );
+  throwIfAborted(signal);
+  await yieldToUI();
+
+  const analysisNotes = mix.analysis.slice(0, 4).map((a) => {
+    const peak = Number.isFinite(a.peakDb) ? a.peakDb.toFixed(1) : '?';
+    const rms = Number.isFinite(a.rmsDb) ? a.rmsDb.toFixed(1) : '?';
+    const gain = mix.stemSettings[a.stemId]?.gain ?? 0;
+    const gStr = `${gain >= 0 ? '+' : ''}${gain.toFixed(1)} dB`;
+    return `${a.type}: peak ${peak} · RMS ${rms} · gain ${gStr}`;
+  });
+
+  onProgress?.(100, 'Stem balance complete');
+  return {
+    buffer: bounced,
+    notes: [
+      'DSP stem split → Auto Mix balance → offline bounce.',
+      'Existing Auto Mix path (gain staging, pan spread, anti-masking carve).',
+      ...analysisNotes,
+    ],
+  };
+}
+
 export async function runAssemblyLine(
   buffer: AudioBuffer,
   options: AssemblyLineOptions = {}
@@ -286,12 +352,14 @@ export async function runAssemblyLine(
   const {
     onProgress,
     signal,
+    trackName = 'Track',
     targetLUFS = -14,
     streamingTarget = 'spotify',
     hitMaker = true,
     studioTune = true,
     resonanceCleanup = true,
     vocalPocket = true,
+    stemBalance = false,
   } = options;
   const stageNotes: AssemblyStageNote[] = [];
   const delivery = getStreamingTarget(streamingTarget);
@@ -395,15 +463,42 @@ export async function runAssemblyLine(
     ],
   });
 
-  // ── 6. Vocal pocket (center ride + carve) ────────────────────
-  let afterPocket = leveled.buffer;
+  // ── 6. Optional multi-stem Auto Mix balance ──────────────────
+  let afterBalance = leveled.buffer;
+  if (stemBalance) {
+    throwIfAborted(signal);
+    onProgress?.(40, 'balance', 'Stem Balance — separating & Auto Mixing...');
+    await yieldToUI();
+    const balanced = await applyStemAutoBalance(
+      leveled.buffer,
+      trackName,
+      mapProgress(onProgress, 'balance', 40, 12),
+      signal
+    );
+    afterBalance = balanced.buffer;
+    await yieldToUI();
+    stageNotes.push({
+      stage: 'balance',
+      label: ASSEMBLY_STAGE_LABELS.balance,
+      notes: balanced.notes,
+    });
+  } else {
+    stageNotes.push({
+      stage: 'balance',
+      label: ASSEMBLY_STAGE_LABELS.balance,
+      notes: ['Stem Balance skipped — stereo path only.'],
+    });
+  }
+
+  // ── 7. Vocal pocket (center ride + carve) ────────────────────
+  let afterPocket = afterBalance;
   if (vocalPocket) {
     throwIfAborted(signal);
-    onProgress?.(41, 'pocket', 'Vocal pocket — sitting the lead...');
+    onProgress?.(stemBalance ? 53 : 41, 'pocket', 'Vocal pocket — sitting the lead...');
     await yieldToUI();
     const pocket = await applyVocalPocket(
-      leveled.buffer,
-      mapProgress(onProgress, 'pocket', 41, 7)
+      afterBalance,
+      mapProgress(onProgress, 'pocket', stemBalance ? 53 : 41, 7)
     );
     afterPocket = pocket.buffer;
     await yieldToUI();
@@ -420,15 +515,15 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 7. Studio Tune (natural pitch polish) ────────────────────
+  // ── 8. Studio Tune (natural pitch polish) ────────────────────
   let afterTune = afterPocket;
   if (studioTune) {
     throwIfAborted(signal);
-    onProgress?.(49, 'tune', 'Studio Tune — natural pitch polish...');
+    onProgress?.(stemBalance ? 61 : 49, 'tune', 'Studio Tune — natural pitch polish...');
     await yieldToUI();
     const tuned = await applyAssemblyStudioTune(
       afterPocket,
-      mapProgress(onProgress, 'tune', 49, 9)
+      mapProgress(onProgress, 'tune', stemBalance ? 61 : 49, 8)
     );
     afterTune = tuned.buffer;
     await yieldToUI();
@@ -445,17 +540,17 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 8. Smart Enhance (adaptive polish) ───────────────────────
+  // ── 9. Smart Enhance (adaptive polish) ───────────────────────
   let masterInput = afterTune;
   let enhanceCharacter: SonicCharacter | null = null;
   let enhanceIntensity = 0.5;
 
   if (hitMaker) {
     throwIfAborted(signal);
-    onProgress?.(59, 'hit', 'Smart Enhance — adapting to the track...');
+    onProgress?.(stemBalance ? 70 : 59, 'hit', 'Smart Enhance — adapting to the track...');
     await yieldToUI();
     const enhanced = await applySmartEnhance(afterTune, sections, diagnosis, {
-      onProgress: mapProgress(onProgress, 'hit', 59, 9),
+      onProgress: mapProgress(onProgress, 'hit', stemBalance ? 70 : 59, 6),
     });
     masterInput = enhanced.buffer;
     enhanceCharacter = enhanced.character;
@@ -473,14 +568,17 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 9. Master (streaming-aware) ──────────────────────────────
+  // ── 10. Master (streaming-aware) ─────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(70, 'master', 'Analyzing for master...');
+  onProgress?.(stemBalance ? 77 : 70, 'master', 'Analyzing for master...');
   await yieldToUI();
-  const trackAnalysis = analyzeAndMasterTrack(masterInput, mapProgress(onProgress, 'master', 70, 4));
+  const trackAnalysis = analyzeAndMasterTrack(
+    masterInput,
+    mapProgress(onProgress, 'master', stemBalance ? 77 : 70, 3)
+  );
   await yieldToUI();
 
-  onProgress?.(75, 'master', 'Sonic character...');
+  onProgress?.(stemBalance ? 81 : 75, 'master', 'Sonic character...');
   await yieldToUI();
   const character = detectSonicCharacter(masterInput);
   const profile = getProcessingProfile(character.character, character.traits);
@@ -535,13 +633,13 @@ export async function runAssemblyLine(
   }
 
   throwIfAborted(signal);
-  onProgress?.(80, 'master', `Mastering for ${delivery.name}...`);
+  onProgress?.(stemBalance ? 84 : 80, 'master', `Mastering for ${delivery.name}...`);
   await yieldToUI();
   const masteringStats = await applyMasteringChain(
     masterInput,
     trackAnalysis.analysis,
     masterTarget,
-    mapProgress(onProgress, 'master', 80, 16),
+    mapProgress(onProgress, 'master', stemBalance ? 84 : 80, 12),
     approach
   );
   await yieldToUI();
@@ -578,6 +676,7 @@ export async function runAssemblyLine(
     resonanceCleanup ? 'resonance' : null,
     'correct',
     'level',
+    stemBalance ? 'stem balance' : null,
     vocalPocket ? 'vocal pocket' : null,
     studioTune ? 'studio tune' : null,
     hitMaker ? 'enhance' : null,

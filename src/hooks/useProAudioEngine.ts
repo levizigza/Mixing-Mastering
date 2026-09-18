@@ -33,7 +33,6 @@ import {
 } from '@/lib/defaults';
 import { generateId } from '@/lib/utils';
 import { autoMixAndMaster, AutoMixResult, analyzeAndMasterTrack, QuickMasterResult } from '@/lib/auto-mix';
-import { separateStems } from '@/lib/stem-separator';
 import { optimizeBeat, analyzeBeat, BeatOptimizeSettings, BeatAnalysis, autoOptimizeBeat } from '@/lib/beat-optimizer';
 import { correctPitch, detectKey } from '@/lib/pitch-correction';
 import { applyVocalEffects } from '@/lib/vocal-effects';
@@ -2031,6 +2030,7 @@ export function useProAudioEngine() {
   const runAssemblyLineStation = useCallback(async (file: File, opts?: {
     hitMaker?: boolean;
     studioTune?: boolean;
+    stemBalance?: boolean;
     streamingTarget?: string;
   }) => {
     assemblyAbortRef.current?.abort();
@@ -2039,6 +2039,7 @@ export function useProAudioEngine() {
 
     const useHitMaker = opts?.hitMaker !== false;
     const useStudioTune = opts?.studioTune !== false;
+    const useStemBalance = opts?.stemBalance === true;
 
     setIsAssemblyLine(true);
     setAssemblyProgress(0);
@@ -2061,6 +2062,7 @@ export function useProAudioEngine() {
         signal: ac.signal,
         hitMaker: useHitMaker,
         studioTune: useStudioTune,
+        stemBalance: useStemBalance,
         streamingTarget: (opts?.streamingTarget as import('@/lib/streaming-targets').StreamingPlatformId) || 'spotify',
         onProgress: (pct, stageId: AssemblyStageId, message) => {
           assemblyProgressPendingRef.current = {

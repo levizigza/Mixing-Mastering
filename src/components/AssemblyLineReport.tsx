@@ -21,6 +21,7 @@ const STAGE_ORDER: AssemblyStageId[] = [
   'resonance',
   'fix',
   'level',
+  'balance',
   'pocket',
   'tune',
   'hit',

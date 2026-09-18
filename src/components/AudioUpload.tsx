@@ -18,6 +18,7 @@ import {
   Package,
   Factory,
   Sparkles,
+  Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { StemType } from '@/types/audio';
@@ -40,6 +41,7 @@ interface AudioUploadProps {
   onAssemblyLine?: (file: File, opts?: {
     hitMaker?: boolean;
     studioTune?: boolean;
+    stemBalance?: boolean;
     streamingTarget?: string;
   }) => void;
   onCancelAssemblyLine?: () => void;
@@ -252,6 +254,7 @@ export default function AudioUpload({
   const [assemblyFile, setAssemblyFile] = useState<File | null>(null);
   const [hitMakerEnabled, setHitMakerEnabled] = useState(true);
   const [studioTuneEnabled, setStudioTuneEnabled] = useState(true);
+  const [stemBalanceEnabled, setStemBalanceEnabled] = useState(false);
   const [streamingTarget, setStreamingTarget] = useState<StreamingPlatformId>('spotify');
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
@@ -330,9 +333,10 @@ export default function AudioUpload({
     onAssemblyLine(assemblyFile, {
       hitMaker: hitMakerEnabled,
       studioTune: studioTuneEnabled,
+      stemBalance: stemBalanceEnabled,
       streamingTarget,
     });
-  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled, streamingTarget]);
+  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled, stemBalanceEnabled, streamingTarget]);
 
   const clearAssemblyFile = useCallback(() => {
     setAssemblyFile(null);
@@ -558,6 +562,46 @@ export default function AudioUpload({
                   }}
                 >
                   {studioTuneEnabled ? 'NATURAL' : 'OFF'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStemBalanceEnabled((v) => !v)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md border transition-all text-left"
+                style={
+                  stemBalanceEnabled
+                    ? {
+                        borderColor: '#f59e0b66',
+                        background: 'rgba(245, 158, 11, 0.12)',
+                      }
+                    : { borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.25)' }
+                }
+              >
+                <Layers
+                  size={14}
+                  className="shrink-0"
+                  style={{ color: stemBalanceEnabled ? '#f59e0b' : '#6b7280' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="text-[10px] font-display tracking-wider"
+                    style={{ color: stemBalanceEnabled ? '#fcd34d' : '#9ca3af' }}
+                  >
+                    STEM BALANCE {stemBalanceEnabled ? 'ON' : 'OFF'}
+                  </p>
+                  <p className="text-[8px] font-mono text-studio-muted leading-snug">
+                    Optional · separate → Auto Mix → bounce (heavier)
+                  </p>
+                </div>
+                <span
+                  className="text-[8px] font-mono px-1.5 py-0.5 rounded border shrink-0"
+                  style={{
+                    color: stemBalanceEnabled ? '#fcd34d' : '#6b7280',
+                    borderColor: stemBalanceEnabled ? '#f59e0b55' : 'rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {stemBalanceEnabled ? 'AUTO MIX' : 'OFF'}
                 </span>
               </button>
 
