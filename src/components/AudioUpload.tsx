@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { StemType } from '@/types/audio';
 import { LevelingMode } from '@/lib/audio-leveler';
 import { AUTOTUNE_PRESETS, intensityToLabel } from '@/lib/autotune-station';
+import { STREAMING_TARGETS, type StreamingPlatformId } from '@/lib/streaming-targets';
 import { STATION_ORDER, STATION_THEMES, StationId } from '@/lib/station-theme';
 
 type UploadMode = StationId;
@@ -36,7 +37,11 @@ interface AudioUploadProps {
   onAutotune?: (file: File, intensity: number) => void;
   onVocalFix?: (file: File) => void;
   onRepair?: (file: File) => void;
-  onAssemblyLine?: (file: File, opts?: { hitMaker?: boolean; studioTune?: boolean }) => void;
+  onAssemblyLine?: (file: File, opts?: {
+    hitMaker?: boolean;
+    studioTune?: boolean;
+    streamingTarget?: string;
+  }) => void;
   onCancelAssemblyLine?: () => void;
   onStationChange?: (station: StationId) => void;
   existingStems: string[];
@@ -247,6 +252,7 @@ export default function AudioUpload({
   const [assemblyFile, setAssemblyFile] = useState<File | null>(null);
   const [hitMakerEnabled, setHitMakerEnabled] = useState(true);
   const [studioTuneEnabled, setStudioTuneEnabled] = useState(true);
+  const [streamingTarget, setStreamingTarget] = useState<StreamingPlatformId>('spotify');
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
   const [showManualStations, setShowManualStations] = useState(false);
@@ -324,8 +330,9 @@ export default function AudioUpload({
     onAssemblyLine(assemblyFile, {
       hitMaker: hitMakerEnabled,
       studioTune: studioTuneEnabled,
+      streamingTarget,
     });
-  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled]);
+  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled, streamingTarget]);
 
   const clearAssemblyFile = useCallback(() => {
     setAssemblyFile(null);
@@ -401,7 +408,7 @@ export default function AudioUpload({
               FULL AUTO ASSEMBLY LINE
             </p>
             <p className="text-[9px] text-studio-muted font-mono truncate">
-              1. Drop MP3 · 2. Studio Tune + Enhance · 3. Press Start
+              1. Drop · 2. Target + Tune · 3. Start
             </p>
           </div>
           <span
@@ -477,6 +484,42 @@ export default function AudioUpload({
                   No file selected yet
                 </p>
               )}
+
+              <div className="space-y-1.5">
+                <p className="text-[8px] font-mono text-studio-muted tracking-wider px-0.5">
+                  STREAMING TARGET
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {STREAMING_TARGETS.map((t) => {
+                    const on = streamingTarget === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        title={t.blurb}
+                        onClick={() => setStreamingTarget(t.id)}
+                        className="text-[8px] font-mono px-1.5 py-1 rounded border transition-all"
+                        style={
+                          on
+                            ? {
+                                color: '#86efac',
+                                borderColor: '#22c55e66',
+                                background: 'rgba(34, 197, 94, 0.12)',
+                              }
+                            : {
+                                color: '#9ca3af',
+                                borderColor: 'rgba(255,255,255,0.1)',
+                                background: 'rgba(0,0,0,0.25)',
+                              }
+                        }
+                      >
+                        {t.name.split(' ')[0]}
+                        <span className="opacity-70"> {t.lufs}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               <button
                 type="button"

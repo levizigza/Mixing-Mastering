@@ -798,12 +798,26 @@ export async function applyMasteringChain(
   await new Promise((r) => setTimeout(r, 0));
 
   const finalLUFS = measureLUFS(L, R, sr);
+  // AES17 / BS.1770 true-peak: report ISP, not just sample peak
   let truePeak = 0;
-  for (let i = 0; i < len; i++) {
-    const absL = Math.abs(L[i]);
-    const absR = Math.abs(R[i]);
-    if (absL > truePeak) truePeak = absL;
-    if (absR > truePeak) truePeak = absR;
+  {
+    let l0 = 0,
+      l1 = 0,
+      l2 = 0;
+    let r0 = 0,
+      r1 = 0,
+      r2 = 0;
+    for (let i = 0; i < len; i++) {
+      const l3 = L[i];
+      const r3 = R[i];
+      truePeak = Math.max(truePeak, ispPeak4x(l0, l1, l2, l3), ispPeak4x(r0, r1, r2, r3));
+      l0 = l1;
+      l1 = l2;
+      l2 = l3;
+      r0 = r1;
+      r1 = r2;
+      r2 = r3;
+    }
   }
   const truePeakDb = truePeak > 0 ? 20 * Math.log10(truePeak) : -Infinity;
 

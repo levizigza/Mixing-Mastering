@@ -9,13 +9,18 @@ import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
 import { applySmartEnhance, smartEnhanceMasteringBoost } from '@/lib/hit-maker';
 import { runAutotuneStation } from '@/lib/autotune-station';
+import { applyResonanceCleanup } from '@/lib/resonance-eq';
+import { applyVocalPocket } from '@/lib/vocal-pocket';
+import { getStreamingTarget, StreamingPlatformId } from '@/lib/streaming-targets';
 import type { SonicCharacter } from '@/lib/sonic-character';
 
 export type AssemblyStageId =
   | 'analyze'
   | 'repair'
+  | 'resonance'
   | 'fix'
   | 'level'
+  | 'pocket'
   | 'tune'
   | 'hit'
   | 'master'
@@ -25,8 +30,10 @@ export type AssemblyStageId =
 export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   analyze: 'Analyze',
   repair: 'Repair',
+  resonance: 'Resonance',
   fix: 'Correct',
   level: 'Level',
+  pocket: 'Vocal Pocket',
   tune: 'Studio Tune',
   hit: 'Smart Enhance',
   master: 'Master',
@@ -53,6 +60,9 @@ export interface AssemblyLineReportData {
   truePeak: number;
   bpm: number;
   sectionCount: number;
+  /** Streaming target used for the master */
+  streamingTarget?: string;
+  streamingLUFS?: number;
 }
 
 export interface AssemblyLineResult {
@@ -65,7 +75,10 @@ export interface AssemblyLineOptions {
   onProgress?: (pct: number, stageId: AssemblyStageId, message: string) => void;
   signal?: AbortSignal;
   trackName?: string;
+  /** Fallback if no streamingTarget — default −14 */
   targetLUFS?: number;
+  /** Streaming / social loudness target (drives master LUFS + true peak) */
+  streamingTarget?: StreamingPlatformId;
   /** Analysis-driven adaptive polish (genre/vibe aware) */
   hitMaker?: boolean;
   hitMakerIntensity?: number;
@@ -74,6 +87,10 @@ export interface AssemblyLineOptions {
    * Transparent Retune-style correction — not hard / T-Pain Auto-Tune.
    */
   studioTune?: boolean;
+  /** Surgical resonance notches (default true) */
+  resonanceCleanup?: boolean;
+  /** Center vocal ride + pocket carve (default true) */
+  vocalPocket?: boolean;
 }
 
 function createMonoBuffer(data: Float32Array, sampleRate: number): AudioBuffer {
@@ -270,16 +287,20 @@ export async function runAssemblyLine(
     onProgress,
     signal,
     targetLUFS = -14,
+    streamingTarget = 'spotify',
     hitMaker = true,
     studioTune = true,
+    resonanceCleanup = true,
+    vocalPocket = true,
   } = options;
   const stageNotes: AssemblyStageNote[] = [];
+  const delivery = getStreamingTarget(streamingTarget);
 
   // ── 1. Analyze ───────────────────────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(3, 'analyze', 'Analyzing structure and issues...');
+  onProgress?.(2, 'analyze', 'Analyzing structure and issues...');
   await yieldToUI();
-  const { diagnosis, sections } = await analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 3, 8));
+  const { diagnosis, sections } = await analyzePipeline(buffer, mapProgress(onProgress, 'analyze', 2, 6));
   await yieldToUI();
   stageNotes.push({
     stage: 'analyze',
@@ -293,13 +314,13 @@ export async function runAssemblyLine(
 
   // ── 2. Repair on the stereo mix ──────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(12, 'repair', 'Cleanup bay...');
+  onProgress?.(9, 'repair', 'Cleanup bay...');
   await yieldToUI();
   const repairSettings = repairFromDiagnosis(diagnosis);
   const repaired = await runAudioRepair(
     buffer,
     repairSettings,
-    mapProgress(onProgress, 'repair', 12, 10)
+    mapProgress(onProgress, 'repair', 9, 8)
   );
   await yieldToUI();
   stageNotes.push({
@@ -308,14 +329,39 @@ export async function runAssemblyLine(
     notes: repaired.notes.length ? repaired.notes : ['Light cleanup pass.'],
   });
 
-  // ── 3. Corrective EQ from diagnosis ──────────────────────────
+  // ── 3. Surgical resonance EQ ─────────────────────────────────
+  let afterResonance = repaired.buffer;
+  if (resonanceCleanup) {
+    throwIfAborted(signal);
+    onProgress?.(18, 'resonance', 'Hunting resonances...');
+    await yieldToUI();
+    const res = await applyResonanceCleanup(
+      repaired.buffer,
+      mapProgress(onProgress, 'resonance', 18, 8)
+    );
+    afterResonance = res.buffer;
+    await yieldToUI();
+    stageNotes.push({
+      stage: 'resonance',
+      label: ASSEMBLY_STAGE_LABELS.resonance,
+      notes: res.notes,
+    });
+  } else {
+    stageNotes.push({
+      stage: 'resonance',
+      label: ASSEMBLY_STAGE_LABELS.resonance,
+      notes: ['Resonance cleanup skipped.'],
+    });
+  }
+
+  // ── 4. Corrective EQ from diagnosis ──────────────────────────
   throwIfAborted(signal);
-  onProgress?.(24, 'fix', 'Fixing problem bands...');
+  onProgress?.(27, 'fix', 'Fixing problem bands...');
   await yieldToUI();
   const corrected = await applyCorrectiveEq(
-    repaired.buffer,
+    afterResonance,
     diagnosis,
-    mapProgress(onProgress, 'fix', 24, 8)
+    mapProgress(onProgress, 'fix', 27, 6)
   );
   await yieldToUI();
   stageNotes.push({
@@ -324,7 +370,7 @@ export async function runAssemblyLine(
     notes: corrected.notes,
   });
 
-  // ── 4. Level ─────────────────────────────────────────────────
+  // ── 5. Level ─────────────────────────────────────────────────
   throwIfAborted(signal);
   onProgress?.(34, 'level', 'Gain staging...');
   await yieldToUI();
@@ -337,7 +383,7 @@ export async function runAssemblyLine(
   const leveled = await autoLevelTrack(
     corrected.buffer,
     { mode: levelMode },
-    mapProgress(onProgress, 'level', 34, 8)
+    mapProgress(onProgress, 'level', 34, 6)
   );
   await yieldToUI();
   stageNotes.push({
@@ -349,15 +395,40 @@ export async function runAssemblyLine(
     ],
   });
 
-  // ── 5. Studio Tune (natural pitch polish) ────────────────────
-  let afterTune = leveled.buffer;
+  // ── 6. Vocal pocket (center ride + carve) ────────────────────
+  let afterPocket = leveled.buffer;
+  if (vocalPocket) {
+    throwIfAborted(signal);
+    onProgress?.(41, 'pocket', 'Vocal pocket — sitting the lead...');
+    await yieldToUI();
+    const pocket = await applyVocalPocket(
+      leveled.buffer,
+      mapProgress(onProgress, 'pocket', 41, 7)
+    );
+    afterPocket = pocket.buffer;
+    await yieldToUI();
+    stageNotes.push({
+      stage: 'pocket',
+      label: ASSEMBLY_STAGE_LABELS.pocket,
+      notes: pocket.notes,
+    });
+  } else {
+    stageNotes.push({
+      stage: 'pocket',
+      label: ASSEMBLY_STAGE_LABELS.pocket,
+      notes: ['Vocal pocket skipped.'],
+    });
+  }
+
+  // ── 7. Studio Tune (natural pitch polish) ────────────────────
+  let afterTune = afterPocket;
   if (studioTune) {
     throwIfAborted(signal);
-    onProgress?.(44, 'tune', 'Studio Tune — natural pitch polish...');
+    onProgress?.(49, 'tune', 'Studio Tune — natural pitch polish...');
     await yieldToUI();
     const tuned = await applyAssemblyStudioTune(
-      leveled.buffer,
-      mapProgress(onProgress, 'tune', 44, 12)
+      afterPocket,
+      mapProgress(onProgress, 'tune', 49, 9)
     );
     afterTune = tuned.buffer;
     await yieldToUI();
@@ -374,18 +445,17 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 6. Smart Enhance (adaptive polish) ───────────────────────
+  // ── 8. Smart Enhance (adaptive polish) ───────────────────────
   let masterInput = afterTune;
   let enhanceCharacter: SonicCharacter | null = null;
   let enhanceIntensity = 0.5;
 
   if (hitMaker) {
     throwIfAborted(signal);
-    onProgress?.(58, 'hit', 'Smart Enhance — adapting to the track...');
+    onProgress?.(59, 'hit', 'Smart Enhance — adapting to the track...');
     await yieldToUI();
     const enhanced = await applySmartEnhance(afterTune, sections, diagnosis, {
-      // Omit intensity so enhance derives it from analysis (ballad vs banger)
-      onProgress: mapProgress(onProgress, 'hit', 58, 10),
+      onProgress: mapProgress(onProgress, 'hit', 59, 9),
     });
     masterInput = enhanced.buffer;
     enhanceCharacter = enhanced.character;
@@ -403,7 +473,7 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 7. Master (stereo — no heuristic stem remaster) ──────────
+  // ── 9. Master (streaming-aware) ──────────────────────────────
   throwIfAborted(signal);
   onProgress?.(70, 'master', 'Analyzing for master...');
   await yieldToUI();
@@ -415,26 +485,41 @@ export async function runAssemblyLine(
   const character = detectSonicCharacter(masterInput);
   const profile = getProcessingProfile(character.character, character.traits);
 
-  let masterTarget = profile.masteringApproach.targetLUFS ?? targetLUFS;
+  // Platform target is the primary objective; character may bias slightly
+  let masterTarget = delivery.lufs;
+  if (typeof targetLUFS === 'number' && streamingTarget === undefined) {
+    masterTarget = targetLUFS;
+  }
+  // Soft vibes: don't crush dynamics beyond platform
   if (hitMaker && enhanceCharacter) {
-    // Soft vibes stay near streaming norm; energetic vibes go more competitive
     const soft =
       enhanceCharacter === 'minimal' ||
       enhanceCharacter === 'moody' ||
       enhanceCharacter === 'atmospheric' ||
       enhanceCharacter === 'soulful';
-    masterTarget = soft ? Math.min(masterTarget, -13) : Math.min(masterTarget, -11.5);
+    if (soft && delivery.id !== 'dynamic') {
+      masterTarget = Math.min(masterTarget, delivery.lufs); // keep platform or quieter
+      masterTarget = Math.max(masterTarget, delivery.lufs - 1.5);
+    }
   }
   if (hasIssue(diagnosis.issues, 'loudness', 'medium') && diagnosis.estimatedLufs > -11) {
-    masterTarget = Math.min(masterTarget, -13);
+    // Already loud program — prefer not to push harder than platform
+    masterTarget = Math.min(masterTarget, delivery.lufs);
   }
-  if (diagnosis.estimatedLufs < -18) {
-    masterTarget = Math.max(masterTarget, hitMaker ? -12.5 : -14);
+  if (diagnosis.estimatedLufs < -18 && delivery.id !== 'dynamic') {
+    masterTarget = Math.max(masterTarget, Math.min(delivery.lufs, -12.5));
   }
 
-  let approach = { ...profile.masteringApproach, targetLUFS: masterTarget };
+  let approach = {
+    ...profile.masteringApproach,
+    targetLUFS: masterTarget,
+    truePeakCeiling: delivery.truePeak,
+  };
   if (hitMaker && enhanceCharacter) {
     approach = smartEnhanceMasteringBoost(approach, enhanceCharacter, enhanceIntensity);
+    // Re-assert platform ceiling / loudness after boost so streaming wins
+    approach.targetLUFS = masterTarget;
+    approach.truePeakCeiling = Math.min(approach.truePeakCeiling, delivery.truePeak);
   }
   if (hasIssue(diagnosis.issues, 'lowDynamics', 'high')) {
     approach.multibandAggression *= 0.45;
@@ -450,7 +535,7 @@ export async function runAssemblyLine(
   }
 
   throwIfAborted(signal);
-  onProgress?.(80, 'master', 'Mastering chain...');
+  onProgress?.(80, 'master', `Mastering for ${delivery.name}...`);
   await yieldToUI();
   const masteringStats = await applyMasteringChain(
     masterInput,
@@ -465,8 +550,9 @@ export async function runAssemblyLine(
     stage: 'master',
     label: ASSEMBLY_STAGE_LABELS.master,
     notes: [
+      `Delivery: ${delivery.name} → ${masterTarget} LUFS · TP ≤ ${delivery.truePeak} dBTP`,
       `Character: ${character.character} (${Math.round(character.confidence * 100)}%)`,
-      `Target ${masterTarget} LUFS → final ${masteringStats.finalLUFS.toFixed(1)} · TP ${masteringStats.truePeak.toFixed(1)} dBTP`,
+      `Final ${masteringStats.finalLUFS.toFixed(1)} LUFS · TP ${masteringStats.truePeak.toFixed(1)} dBTP`,
       hitMaker
         ? `Smart Enhance mastering (${enhanceCharacter ?? 'adaptive'} · intensity ${Math.round(enhanceIntensity * 100)}%)`
         : 'Transparent mastering profile',
@@ -481,13 +567,18 @@ export async function runAssemblyLine(
   stageNotes.push({
     stage: 'deliver',
     label: ASSEMBLY_STAGE_LABELS.deliver,
-    notes: ['Final master ready for download and playback.'],
+    notes: [
+      `24-bit WAV + 320 kbps MP3 · target ${delivery.name}`,
+      'Final master ready for download and playback.',
+    ],
   });
   const pathBits = [
     'analyze',
     'repair',
+    resonanceCleanup ? 'resonance' : null,
     'correct',
     'level',
+    vocalPocket ? 'vocal pocket' : null,
     studioTune ? 'studio tune' : null,
     hitMaker ? 'enhance' : null,
     'master',
@@ -514,6 +605,8 @@ export async function runAssemblyLine(
       truePeak: masteringStats.truePeak,
       bpm: diagnosis.bpm,
       sectionCount: sections.length,
+      streamingTarget: delivery.name,
+      streamingLUFS: masterTarget,
     },
   };
 }

@@ -18,8 +18,10 @@ interface AssemblyLineReportProps {
 const STAGE_ORDER: AssemblyStageId[] = [
   'analyze',
   'repair',
+  'resonance',
   'fix',
   'level',
+  'pocket',
   'tune',
   'hit',
   'master',
@@ -91,6 +93,7 @@ export default function AssemblyLineReport({
           <div className="text-[10px] text-violet-200/90 font-mono">
             {result.sectionCount} sections · ~{Math.round(result.bpm)} BPM ·{' '}
             {result.finalLUFS.toFixed(1)} LUFS · TP {result.truePeak.toFixed(1)}
+            {result.streamingTarget ? ` · ${result.streamingTarget}` : ''}
           </div>
 
           <p className="text-[9px] text-emerald-300/80 font-mono">

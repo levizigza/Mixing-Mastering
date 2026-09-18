@@ -2028,7 +2028,11 @@ export function useProAudioEngine() {
     setAssemblyMessage(pending.message);
   }, []);
 
-  const runAssemblyLineStation = useCallback(async (file: File, opts?: { hitMaker?: boolean; studioTune?: boolean }) => {
+  const runAssemblyLineStation = useCallback(async (file: File, opts?: {
+    hitMaker?: boolean;
+    studioTune?: boolean;
+    streamingTarget?: string;
+  }) => {
     assemblyAbortRef.current?.abort();
     const ac = new AbortController();
     assemblyAbortRef.current = ac;
@@ -2057,6 +2061,7 @@ export function useProAudioEngine() {
         signal: ac.signal,
         hitMaker: useHitMaker,
         studioTune: useStudioTune,
+        streamingTarget: (opts?.streamingTarget as import('@/lib/streaming-targets').StreamingPlatformId) || 'spotify',
         onProgress: (pct, stageId: AssemblyStageId, message) => {
           assemblyProgressPendingRef.current = {
             pct,
