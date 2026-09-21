@@ -675,7 +675,7 @@ export default function AudioUpload({
                     PRODUCER PASS {producerPassEnabled ? 'ON' : 'OFF'}
                   </p>
                   <p className="text-[8px] font-mono text-studio-muted leading-snug">
-                    Intangibles · multi-listen taste polish for radio
+                    Intangibles · clarity & pocket, level-matched
                   </p>
                 </div>
                 <span

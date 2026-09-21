@@ -68,25 +68,10 @@ function calcPeaking(freq: number, gain: number, Q: number, sr: number): BiquadC
   const alpha = Math.sin(w0) / (2 * Q);
   const b0 = 1 + alpha * A;
   const b1 = -2 * Math.cos(w0);
-  const b2 = 1 + alpha * A;
+  const b2 = 1 - alpha * A;
   const a0 = 1 + alpha / A;
   const a1 = -2 * Math.cos(w0);
   const a2 = 1 - alpha / A;
-  return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
-}
-
-function calcLowShelf(freq: number, gain: number, Q: number, sr: number): BiquadCoeffs {
-  const A = Math.pow(10, gain / 40);
-  const w0 = (2 * Math.PI * freq) / sr;
-  const alpha = Math.sin(w0) / (2 * Q);
-  const cosW = Math.cos(w0);
-  const sqrtA = Math.sqrt(A);
-  const b0 = A * (A + 1 - (A - 1) * cosW + 2 * sqrtA * alpha);
-  const b1 = 2 * A * (A - 1 + (A + 1) * cosW);
-  const b2 = A * (A + 1 - (A - 1) * cosW - 2 * sqrtA * alpha);
-  const a0 = A + 1 + (A - 1) * cosW + 2 * sqrtA * alpha;
-  const a1 = -2 * (A - 1 + (A + 1) * cosW);
-  const a2 = A + 1 + (A - 1) * cosW - 2 * sqrtA * alpha;
   return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
 }
 
@@ -235,43 +220,73 @@ function measureCohesion(L: Float32Array, R: Float32Array, sr: number): Cohesion
   return { tonalBalance, midSideLock, lowPocket, bodyPunch, imageStability, score };
 }
 
-/** Soft bus glue — locks elements without crushing. */
+function signalRms(L: Float32Array, R: Float32Array): number {
+  let e = 0;
+  const n = L.length;
+  for (let i = 0; i < n; i++) e += L[i] * L[i] + R[i] * R[i];
+  return Math.sqrt(e / Math.max(1, n * 2));
+}
+
+/** Restore loudness after a taste move. Clamped so a bad filter can't be "fixed" by +6 dB. */
+function matchRms(L: Float32Array, R: Float32Array, target: number): number {
+  const cur = signalRms(L, R);
+  if (cur < 1e-8 || target < 1e-8) return 1;
+  const g = Math.max(Math.pow(10, -0.6 / 20), Math.min(Math.pow(10, 1.2 / 20), target / cur));
+  if (Math.abs(g - 1) < 0.002) return 1;
+  for (let i = 0; i < L.length; i++) {
+    L[i] *= g;
+    R[i] *= g;
+  }
+  return g;
+}
+
+/**
+ * Parallel glue only — dry signal stays intact, wet is gain-matched,
+ * then the sum is returned without a static downward gain.
+ */
 function applyGlue(
   L: Float32Array,
   R: Float32Array,
   sr: number,
   amount: number
 ): { L: Float32Array; R: Float32Array } {
-  if (amount < 0.05) return { L, R };
-  const outL = new Float32Array(L.length);
-  const outR = new Float32Array(R.length);
-  const thresh = 0.18;
-  const ratio = 1.4 + amount * 1.2;
-  const att = 1 - Math.exp(-1 / (sr * 0.012));
-  const rel = 1 - Math.exp(-1 / (sr * 0.18));
+  if (amount < 0.04) return { L, R };
+  const wet = 0.05 + amount * 0.07; // ~5–12% — density, not a level drop
+  const compL = new Float32Array(L.length);
+  const compR = new Float32Array(R.length);
+  const thresh = 0.32;
+  const ratio = 1.6;
+  const att = 1 - Math.exp(-1 / (sr * 0.02));
+  const rel = 1 - Math.exp(-1 / (sr * 0.22));
   let env = 0;
-  const makeup = 1 + amount * 0.06;
 
   for (let i = 0; i < L.length; i++) {
     const mono = (Math.abs(L[i]) + Math.abs(R[i])) * 0.5;
     env += (mono > env ? att : rel) * (mono - env);
     let g = 1;
     if (env > thresh) {
-      const over = env / thresh;
-      const compressed = Math.pow(over, 1 / ratio - 1);
-      g = compressed;
+      g = Math.pow(env / thresh, 1 / ratio - 1);
     }
-    // Soften with amount
-    g = 1 + (g - 1) * amount;
-    outL[i] = L[i] * g * makeup;
-    outR[i] = R[i] * g * makeup;
+    compL[i] = L[i] * g;
+    compR[i] = R[i] * g;
+  }
+
+  const dryRms = signalRms(L, R);
+  const wetRms = signalRms(compL, compR);
+  const makeup = wetRms > 1e-8 ? dryRms / wetRms : 1;
+
+  const outL = new Float32Array(L.length);
+  const outR = new Float32Array(R.length);
+  for (let i = 0; i < L.length; i++) {
+    outL[i] = L[i] + (compL[i] * makeup - L[i]) * wet;
+    outR[i] = R[i] + (compR[i] * makeup - R[i]) * wet;
   }
   return { L: outL, R: outR };
 }
 
 /**
- * Micro sidechain-feel: when mid low energy spikes (kick), gently dip
- * competing low-mid on sides — elements “work together.”
+ * Kick pocket: when the low end speaks, dip only ~200–450 Hz (the mud
+ * that masks the kick). Does not boost bass and does not collapse the sides.
  */
 function applyElementInterplay(
   L: Float32Array,
@@ -282,24 +297,34 @@ function applyElementInterplay(
   if (amount < 0.05) return { L, R };
   const outL = new Float32Array(L.length);
   const outR = new Float32Array(R.length);
-  const lpC = 1 - Math.exp((-2 * Math.PI * 90) / sr);
-  let kickEnv = 0;
-  const att = 1 - Math.exp(-1 / (sr * 0.003));
-  const rel = 1 - Math.exp(-1 / (sr * 0.09));
-  let lpKick = 0;
+  const aKick = Math.exp((-2 * Math.PI * 100) / sr);
+  const aLo = Math.exp((-2 * Math.PI * 200) / sr);
+  const aHi = Math.exp((-2 * Math.PI * 450) / sr);
+  const att = 1 - Math.exp(-1 / (sr * 0.004));
+  const rel = 1 - Math.exp(-1 / (sr * 0.07));
+  let kickLp = 0;
+  let env = 0;
+  let loL = 0;
+  let hiL = 0;
+  let loR = 0;
+  let hiR = 0;
+  const maxDuck = 0.1 * amount; // ≤ ~1 dB on the mud band
 
   for (let i = 0; i < L.length; i++) {
     const mid = (L[i] + R[i]) * 0.5;
-    const side = (L[i] - R[i]) * 0.5;
-    lpKick += lpC * (mid - lpKick);
-    const kickAbs = Math.abs(lpKick);
-    kickEnv += (kickAbs > kickEnv ? att : rel) * (kickAbs - kickEnv);
-    // Dip side low-mid content when kick speaks
-    const duck = 1 - Math.min(0.22, kickEnv * amount * 1.8);
-    // Soften side only slightly; keep mid intact
-    const newSide = side * (0.55 + 0.45 * duck);
-    outL[i] = mid + newSide;
-    outR[i] = mid - newSide;
+    kickLp = mid + (kickLp - mid) * aKick;
+    const kickAbs = Math.abs(kickLp);
+    env += (kickAbs > env ? att : rel) * (kickAbs - env);
+    const duck = Math.min(maxDuck, env * amount * 1.6);
+
+    loL = L[i] + (loL - L[i]) * aLo;
+    hiL = L[i] + (hiL - L[i]) * aHi;
+    loR = R[i] + (loR - R[i]) * aLo;
+    hiR = R[i] + (hiR - R[i]) * aHi;
+    const bandL = hiL - loL;
+    const bandR = hiR - loR;
+    outL[i] = L[i] - bandL * duck;
+    outR[i] = R[i] - bandR * duck;
   }
   return { L: outL, R: outR };
 }
@@ -325,9 +350,11 @@ function applyImageTaste(
     sideE += s * s;
   }
   const cur = midE / (midE + sideE + 1e-12);
-  const delta = (targetMidRatio - cur) * amount * 0.55;
+  // A few percent at most — never fold the image into a muddy center.
+  const delta = Math.max(-0.04, Math.min(0.04, (targetMidRatio - cur) * amount * 0.2));
+  if (Math.abs(delta) < 0.008) return { L, R };
   const midGain = 1 + delta;
-  const sideGain = 1 - delta * 0.85;
+  const sideGain = 1 - delta;
 
   for (let i = 0; i < L.length; i++) {
     const m = (L[i] + R[i]) * 0.5 * midGain;
@@ -338,62 +365,78 @@ function applyImageTaste(
   return { L: outL, R: outR };
 }
 
+/** Low-mid vs vocal-mid energy. Higher = muddier. */
+function mudRatio(L: Float32Array, R: Float32Array, sr: number): number {
+  const n = Math.min(L.length, Math.floor(sr * 40));
+  const mid = new Float32Array(n);
+  for (let i = 0; i < n; i++) mid[i] = (L[i] + R[i]) * 0.5;
+  const lowMid = bandEnergy(mid, sr, 180, 450, n);
+  const presence = bandEnergy(mid, sr, 1500, 5000, n);
+  return lowMid / (presence + 1e-12);
+}
+
 function applyTonalTaste(
   L: Float32Array,
   R: Float32Array,
   sr: number,
-  m: CohesionMetrics,
   intensity: number,
   character: SonicCharacter
 ): { L: Float32Array; R: Float32Array; moves: string[] } {
   const moves: string[] = [];
-  let outL = L;
-  let outR = R;
+  let outL = new Float32Array(L);
+  let outR = new Float32Array(R);
   const soft =
     character === 'minimal' ||
     character === 'moody' ||
     character === 'atmospheric' ||
     character === 'soulful';
-  const scale = intensity * (soft ? 0.72 : 1);
+  const scale = intensity * (soft ? 0.65 : 0.85);
 
-  // Low pocket: if low-mid fights bass, carve ~280 Hz; if thin, gentle sub shelf
-  if (m.lowPocket < 0.72) {
-    const carve = -1.4 * (1 - m.lowPocket) * scale;
-    outL = processBiquad(outL, calcPeaking(280, carve, 1.1, sr));
-    outR = processBiquad(outR, calcPeaking(280, carve, 1.1, sr));
-    const shelf = 0.55 * (1 - m.lowPocket) * scale;
-    outL = processBiquad(outL, calcLowShelf(75, shelf, 0.7, sr));
-    outR = processBiquad(outR, calcLowShelf(75, shelf, 0.7, sr));
-    moves.push(`Low-end pocket carve ${carve.toFixed(1)} dB @280 · shelf +${shelf.toFixed(1)}`);
-  }
+  const n = Math.min(L.length, Math.floor(sr * 40));
+  const mid = new Float32Array(n);
+  for (let i = 0; i < n; i++) mid[i] = (L[i] + R[i]) * 0.5;
+  const lowMid = bandEnergy(mid, sr, 180, 450, n);
+  const body = bandEnergy(mid, sr, 500, 1500, n);
+  const presence = bandEnergy(mid, sr, 2000, 5000, n);
+  const air = bandEnergy(mid, sr, 8000, 14000, n);
+  const vocal = body + presence + 1e-12;
 
-  // Tonal balance: presence / air micro moves toward radio ideal
-  if (m.tonalBalance < 0.78) {
-    const pres = 0.85 * (1 - m.tonalBalance) * scale * (soft ? 0.7 : 1);
-    const air = 0.65 * (1 - m.tonalBalance) * scale;
-    outL = processBiquad(outL, calcPeaking(3200, soft ? pres * 0.7 : pres, 1.2, sr));
-    outR = processBiquad(outR, calcPeaking(3200, soft ? pres * 0.7 : pres, 1.2, sr));
-    outL = processBiquad(outL, calcHighShelf(10500, air, 0.6, sr));
-    outR = processBiquad(outR, calcHighShelf(10500, air, 0.6, sr));
-    // Slight harshness tame if bright
-    if (!soft) {
-      const tame = -0.55 * (1 - m.tonalBalance) * scale;
-      outL = processBiquad(outL, calcPeaking(4800, tame, 1.6, sr));
-      outR = processBiquad(outR, calcPeaking(4800, tame, 1.6, sr));
+  // Only carve mud when low-mids actually outweigh the vocal band. Never boost subs.
+  const mud = lowMid / vocal;
+  if (mud > 0.85) {
+    const carve = Math.max(-1.15, -0.55 * (mud - 0.7) * scale * 2.2);
+    if (carve < -0.2) {
+      outL = new Float32Array(processBiquad(outL, calcPeaking(320, carve, 1.35, sr)));
+      outR = new Float32Array(processBiquad(outR, calcPeaking(320, carve, 1.35, sr)));
+      moves.push(`Clarity carve ${carve.toFixed(1)} dB @320 Hz (no bass boost)`);
     }
-    moves.push(`Tonality taste · presence/air micro-nudge`);
   }
 
-  // Body vs punch: if too peaky, soft body; if flat, tiny transient lift via high-mid
-  if (m.bodyPunch < 0.7) {
-    const body = 0.7 * (1 - m.bodyPunch) * scale;
-    outL = processBiquad(outL, calcPeaking(180, body * 0.6, 0.9, sr));
-    outR = processBiquad(outR, calcPeaking(180, body * 0.6, 0.9, sr));
-    outL = processBiquad(outL, calcPeaking(5500, body * 0.45, 1.4, sr));
-    outR = processBiquad(outR, calcPeaking(5500, body * 0.45, 1.4, sr));
-    moves.push(`Body/punch balance nudge`);
+  // Open the vocal only when presence is thin relative to the body — small, narrow.
+  const presenceRatio = presence / vocal;
+  if (presenceRatio < 0.28) {
+    const pres = Math.min(0.85, 0.45 * (0.34 - presenceRatio) * 8 * scale);
+    if (pres > 0.15) {
+      outL = new Float32Array(processBiquad(outL, calcPeaking(3200, pres, 1.15, sr)));
+      outR = new Float32Array(processBiquad(outR, calcPeaking(3200, pres, 1.15, sr)));
+      moves.push(`Presence +${pres.toFixed(1)} dB`);
+    }
   }
 
+  const airRatio = air / vocal;
+  if (airRatio < 0.06 && !soft) {
+    const airDb = Math.min(0.6, 0.35 * scale);
+    outL = new Float32Array(processBiquad(outL, calcHighShelf(12000, airDb, 0.7, sr)));
+    outR = new Float32Array(processBiquad(outR, calcHighShelf(12000, airDb, 0.7, sr)));
+    moves.push(`Air +${airDb.toFixed(1)} dB`);
+  } else if (airRatio > 0.22) {
+    const tame = Math.max(-0.7, -0.35 * scale);
+    outL = new Float32Array(processBiquad(outL, calcPeaking(5500, tame, 1.5, sr)));
+    outR = new Float32Array(processBiquad(outR, calcPeaking(5500, tame, 1.5, sr)));
+    moves.push(`Harshness tame ${tame.toFixed(1)} dB @5.5 kHz`);
+  }
+
+  if (!moves.length) moves.push('Tonality already balanced — left alone');
   return { L: outL, R: outR, moves };
 }
 
@@ -421,26 +464,39 @@ function applyArrangementTaste(
       const name = (s.name || '').toLowerCase();
       let g = 1;
       if (kind === 'chorus' || name.includes('drop') || name.includes('hook')) {
-        g = 1 + 0.035 * intensity;
+        g = 1 + 0.018 * intensity;
       } else if (kind === 'verse' || kind === 'bridge' || kind === 'outro') {
-        g = 1 - 0.02 * intensity;
+        g = 1 - 0.012 * intensity;
       } else if (kind === 'intro') {
-        g = 1 - 0.015 * intensity;
+        g = 1 - 0.008 * intensity;
       }
       for (let i = start; i < end; i++) curve[i] = g;
     }
-    // Smooth transitions ~40ms
-    const smoothN = Math.floor(sr * 0.04);
+    // Smooth transitions ~80ms, then force the curve to average 1.0
+    // so verses aren't just turned down.
+    const smoothN = Math.floor(sr * 0.08);
     for (let i = 1; i < L.length; i++) {
-      const a = Math.min(1, 1 / smoothN);
+      const a = Math.min(1, 1 / Math.max(1, smoothN));
       curve[i] = curve[i - 1] + a * (curve[i] - curve[i - 1]);
     }
+    let sum = 0;
+    for (let i = 0; i < L.length; i++) sum += curve[i];
+    const mean = sum / L.length;
+    if (mean > 1e-6) {
+      for (let i = 0; i < L.length; i++) curve[i] /= mean;
+    }
   } else {
-    // No sections: gentle middle-forward energy arc
+    // No sections: tiny chorus-like lift in the middle, averaged to unity.
     for (let i = 0; i < L.length; i++) {
       const t = i / L.length;
       const arc = Math.sin(Math.PI * t);
-      curve[i] = 1 + (arc - 0.5) * 0.03 * intensity;
+      curve[i] = 1 + (arc - 0.5) * 0.012 * intensity;
+    }
+    let sum = 0;
+    for (let i = 0; i < L.length; i++) sum += curve[i];
+    const mean = sum / L.length;
+    if (mean > 1e-6) {
+      for (let i = 0; i < L.length; i++) curve[i] /= mean;
     }
   }
 
@@ -495,137 +551,142 @@ export async function applyProducerPass(
 
   let intensity =
     typeof options.intensity === 'number'
-      ? Math.max(0.25, Math.min(1, options.intensity))
-      : 0.48 + analysis.traits.energy * 0.22 + (1 - analysis.traits.dynamicRange) * 0.12;
-  if (soft) intensity *= 0.78;
-  if (analysis.character === 'hitmaker' || analysis.character === 'anthemic') {
-    intensity = Math.max(intensity, 0.58);
-  }
-  intensity = Math.max(0.32, Math.min(0.88, intensity));
+      ? Math.max(0.2, Math.min(0.7, options.intensity))
+      : 0.34 + analysis.traits.energy * 0.12;
+  if (soft) intensity *= 0.8;
+  intensity = Math.max(0.28, Math.min(0.55, intensity));
 
   notes.push(
     `Producer Pass · vibe ${analysis.character} · taste intensity ${Math.round(intensity * 100)}%`
   );
-  notes.push('Simulating multiple producer listens — micro moves only (radio/international polish).');
+  notes.push('Level-matched listens — clarity and pocket only, no bass boost, no loudness drop.');
 
   let L = new Float32Array(buffer.getChannelData(0));
   let R = new Float32Array(stereo ? buffer.getChannelData(1) : buffer.getChannelData(0));
+  const inputRms = signalRms(L, R);
+  const inputMud = mudRatio(L, R, sr);
 
   let metrics = measureCohesion(L, R, sr);
   const startScore = metrics.score;
   notes.push(
-    `Listen 1 cohesion ${Math.round(startScore * 100)}% · tonal ${Math.round(metrics.tonalBalance * 100)} · pocket ${Math.round(metrics.lowPocket * 100)} · lock ${Math.round(metrics.midSideLock * 100)}`
+    `Listen 1 cohesion ${Math.round(startScore * 100)}% · mud ratio ${inputMud.toFixed(2)}`
   );
 
-  const LISTENS = 3;
   let listensDone = 1;
 
-  // ── Listen 2: tonality + low-end pocket + image ──────────────
+  const acceptListen = (
+    prevL: Float32Array,
+    prevR: Float32Array,
+    prevMud: number,
+    label: string
+  ): boolean => {
+    const mud = mudRatio(L, R, sr);
+    const level = signalRms(L, R);
+    const muddier = mud > prevMud * 1.06 && mud > inputMud * 1.04;
+    const quieter = level < signalRms(prevL, prevR) * Math.pow(10, -0.45 / 20);
+    if (muddier || quieter) {
+      L = new Float32Array(prevL);
+      R = new Float32Array(prevR);
+      notes.push(
+        `${label}: kept prior take (${muddier ? 'would have added mud' : 'would have dropped level'}).`
+      );
+      return false;
+    }
+    return true;
+  };
+
+  // ── Listen 2: clarity / presence — no low-end boost ──────────
   throwIfAborted(signal);
-  onProgress?.(22, 'Producer Pass: listen 2 — tonality & pocket...');
+  onProgress?.(22, 'Producer Pass: listen 2 — clarity, not more low end...');
   await yieldToUI();
 
   {
-    const before = metrics.score;
     const prevL = L;
     const prevR = R;
-    const tonal = applyTonalTaste(L, R, sr, metrics, intensity, analysis.character);
+    const prevMud = mudRatio(L, R, sr);
+    const tonal = applyTonalTaste(L, R, sr, intensity, analysis.character);
     L = new Float32Array(tonal.L);
     R = new Float32Array(tonal.R);
     for (const m of tonal.moves) notes.push(`Listen 2: ${m}`);
 
-    const imaged = applyImageTaste(L, R, soft ? 0.58 : 0.64, intensity * 0.85);
+    const imaged = applyImageTaste(L, R, soft ? 0.58 : 0.62, intensity * 0.5);
     L = new Float32Array(imaged.L);
     R = new Float32Array(imaged.R);
 
-    metrics = measureCohesion(L, R, sr);
-    if (metrics.score + 0.002 < before) {
-      L = prevL;
-      R = prevR;
+    if (acceptListen(prevL, prevR, prevMud, 'Listen 2')) {
       metrics = measureCohesion(L, R, sr);
-      notes.push('Listen 2: kept prior take (score did not improve).');
+      notes.push(`Listen 2 kept · cohesion ${Math.round(metrics.score * 100)}%`);
     } else {
-      notes.push(
-        `Listen 2 cohesion ${Math.round(metrics.score * 100)}% (Δ${((metrics.score - before) * 100).toFixed(1)})`
-      );
+      metrics = measureCohesion(L, R, sr);
     }
     listensDone = 2;
   }
 
-  // ── Listen 3: element interplay + glue ───────────────────────
+  // ── Listen 3: kick pocket + parallel glue (dry stays up) ─────
   throwIfAborted(signal);
-  onProgress?.(48, 'Producer Pass: listen 3 — how the beat elements lock...');
+  onProgress?.(48, 'Producer Pass: listen 3 — pocket the kick without dulling...');
   await yieldToUI();
 
   {
+    const prevL = L;
+    const prevR = R;
+    const prevMud = mudRatio(L, R, sr);
     const before = metrics.score;
-    const interplay = applyElementInterplay(L, R, sr, intensity * 0.75);
+    const interplay = applyElementInterplay(L, R, sr, intensity * 0.7);
     L = new Float32Array(interplay.L);
     R = new Float32Array(interplay.R);
 
-    const glueAmt = (soft ? 0.28 : 0.42) * intensity;
+    const glueAmt = (soft ? 0.22 : 0.32) * intensity;
     const glued = applyGlue(L, R, sr, glueAmt);
     L = new Float32Array(glued.L);
     R = new Float32Array(glued.R);
-    notes.push(`Listen 3: element interplay + bus glue ${(glueAmt * 100).toFixed(0)}%`);
 
-    metrics = measureCohesion(L, R, sr);
-    notes.push(
-      `Listen 3 cohesion ${Math.round(metrics.score * 100)}% (Δ${((metrics.score - before) * 100).toFixed(1)})`
-    );
+    if (acceptListen(prevL, prevR, prevMud, 'Listen 3')) {
+      metrics = measureCohesion(L, R, sr);
+      notes.push(
+        `Listen 3 kept · kick pocket + parallel glue ${(glueAmt * 100).toFixed(0)}% · Δ${((metrics.score - before) * 100).toFixed(1)}`
+      );
+    }
     listensDone = 3;
   }
 
-  // ── Listen 4 (final taste): arrangement breathe + last tonal kiss ─
+  // ── Final listen: arrangement contrast, averaged back to unity ─
   throwIfAborted(signal);
-  onProgress?.(72, 'Producer Pass: final listen — radio-ready taste...');
+  onProgress?.(72, 'Producer Pass: final listen — contrast without turning it down...');
   await yieldToUI();
 
   {
-    const before = metrics.score;
-    const arr = applyArrangementTaste(L, R, sr, sections, intensity * 0.9);
+    const prevL = L;
+    const prevR = R;
+    const prevMud = mudRatio(L, R, sr);
+    const arr = applyArrangementTaste(L, R, sr, sections, intensity * 0.85);
     L = new Float32Array(arr.L);
     R = new Float32Array(arr.R);
-    notes.push(`Final listen: ${arr.note}`);
-
-    // Last micro tonal kiss only if still below target
-    if (metrics.score < 0.82) {
-      const kiss = applyTonalTaste(L, R, sr, metrics, intensity * 0.45, analysis.character);
-      L = new Float32Array(kiss.L);
-      R = new Float32Array(kiss.R);
-      if (kiss.moves.length) notes.push(`Final listen: ${kiss.moves[0]}`);
+    if (acceptListen(prevL, prevR, prevMud, 'Final listen')) {
+      notes.push(`Final listen: ${arr.note} (average level unchanged)`);
     }
-
-    // Soft analog-ish even harmonic kiss via gentle soft-clip blend on mid
-    const warmAmt = (soft ? 0.08 : 0.05) * intensity;
-    if (warmAmt > 0.02) {
-      for (let i = 0; i < L.length; i++) {
-        const m = (L[i] + R[i]) * 0.5;
-        const s = (L[i] - R[i]) * 0.5;
-        const warm = Math.tanh(m * (1.15 + warmAmt)) / (1.15 + warmAmt);
-        const mixed = m * (1 - warmAmt) + warm * warmAmt;
-        L[i] = mixed + s;
-        R[i] = mixed - s;
-      }
-      notes.push('Final listen: subtle console warmth on center');
-    }
-
-    metrics = measureCohesion(L, R, sr);
-    notes.push(
-      `Final cohesion ${Math.round(metrics.score * 100)}% (started ${Math.round(startScore * 100)}% · Δ${((metrics.score - startScore) * 100).toFixed(1)})`
-    );
-    listensDone = LISTENS + 1;
+    listensDone = 4;
   }
 
-  normalizePeak(L, R, 0.9);
+  const matched = matchRms(L, R, inputRms);
+  // Headroom for the master — only pull peaks that would clip, never a blanket cut.
+  normalizePeak(L, R, 0.98);
+  const outRms = signalRms(L, R);
+  const levelDb = 20 * Math.log10((outRms + 1e-12) / (inputRms + 1e-12));
+  const outMud = mudRatio(L, R, sr);
+  metrics = measureCohesion(L, R, sr);
+
   await yieldToUI();
   onProgress?.(100, 'Producer Pass complete');
 
   notes.push(
-    listensDone >= 4
-      ? 'Four producer listens locked — intangibles polished for radio / international play.'
-      : 'Producer listens complete.'
+    `Level ${levelDb >= 0 ? '+' : ''}${levelDb.toFixed(2)} dB vs input` +
+      (Math.abs(matched - 1) > 0.01 ? ` (restored ×${matched.toFixed(3)})` : '')
   );
+  notes.push(
+    `Mud ratio ${inputMud.toFixed(2)} → ${outMud.toFixed(2)} · cohesion ${Math.round(startScore * 100)}% → ${Math.round(metrics.score * 100)}%`
+  );
+  notes.push('Four producer listens — clarity and pocket only, loudness handed back to the master.');
 
   return {
     buffer: createBuffer(L, R, sr, stereo),
