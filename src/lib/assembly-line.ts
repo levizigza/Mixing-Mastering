@@ -8,6 +8,7 @@ import { analyzeAndMasterTrack, autoMixAndMaster } from '@/lib/auto-mix';
 import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
 import { applySmartEnhance, smartEnhanceMasteringBoost } from '@/lib/hit-maker';
+import { applyProducerPass } from '@/lib/producer-pass';
 import { runAutotuneStation } from '@/lib/autotune-station';
 import { applyResonanceCleanup } from '@/lib/resonance-eq';
 import { applyVocalPocket } from '@/lib/vocal-pocket';
@@ -26,6 +27,7 @@ export type AssemblyStageId =
   | 'pocket'
   | 'tune'
   | 'hit'
+  | 'producer'
   | 'master'
   | 'deliver'
   | 'done';
@@ -40,6 +42,7 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   pocket: 'Vocal Pocket',
   tune: 'Studio Tune',
   hit: 'Smart Enhance',
+  producer: 'Producer Pass',
   master: 'Master',
   deliver: 'Deliver',
   done: 'Done',
@@ -100,6 +103,11 @@ export interface AssemblyLineOptions {
    * Separate → Auto Mix gain/EQ carve → offline bounce, then continue the chain.
    */
   stemBalance?: boolean;
+  /**
+   * Producer Pass — iterative intangibles polish (default true).
+   * Simulates multiple producer listens: tonality, element lock, radio taste.
+   */
+  producerPass?: boolean;
 }
 
 function createMonoBuffer(data: Float32Array, sampleRate: number): AudioBuffer {
@@ -360,6 +368,7 @@ export async function runAssemblyLine(
     resonanceCleanup = true,
     vocalPocket = true,
     stemBalance = false,
+    producerPass = true,
   } = options;
   const stageNotes: AssemblyStageNote[] = [];
   const delivery = getStreamingTarget(streamingTarget);
@@ -541,18 +550,18 @@ export async function runAssemblyLine(
   }
 
   // ── 9. Smart Enhance (adaptive polish) ───────────────────────
-  let masterInput = afterTune;
+  let afterEnhance = afterTune;
   let enhanceCharacter: SonicCharacter | null = null;
   let enhanceIntensity = 0.5;
 
   if (hitMaker) {
     throwIfAborted(signal);
-    onProgress?.(stemBalance ? 70 : 59, 'hit', 'Smart Enhance — adapting to the track...');
+    onProgress?.(stemBalance ? 68 : 59, 'hit', 'Smart Enhance — adapting to the track...');
     await yieldToUI();
     const enhanced = await applySmartEnhance(afterTune, sections, diagnosis, {
-      onProgress: mapProgress(onProgress, 'hit', stemBalance ? 70 : 59, 6),
+      onProgress: mapProgress(onProgress, 'hit', stemBalance ? 68 : 59, 5),
     });
-    masterInput = enhanced.buffer;
+    afterEnhance = enhanced.buffer;
     enhanceCharacter = enhanced.character;
     enhanceIntensity = enhanced.intensity;
     stageNotes.push({
@@ -568,17 +577,42 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 10. Master (streaming-aware) ─────────────────────────────
+  // ── 10. Producer Pass (intangibles / radio taste) ────────────
+  let masterInput = afterEnhance;
+  if (producerPass) {
+    throwIfAborted(signal);
+    onProgress?.(stemBalance ? 74 : 66, 'producer', 'Producer Pass — listening for intangibles...');
+    await yieldToUI();
+    const produced = await applyProducerPass(afterEnhance, sections, {
+      onProgress: mapProgress(onProgress, 'producer', stemBalance ? 74 : 66, 8),
+      signal,
+    });
+    masterInput = produced.buffer;
+    await yieldToUI();
+    stageNotes.push({
+      stage: 'producer',
+      label: ASSEMBLY_STAGE_LABELS.producer,
+      notes: produced.notes,
+    });
+  } else {
+    stageNotes.push({
+      stage: 'producer',
+      label: ASSEMBLY_STAGE_LABELS.producer,
+      notes: ['Producer Pass skipped.'],
+    });
+  }
+
+  // ── 11. Master (streaming-aware) ─────────────────────────────
   throwIfAborted(signal);
-  onProgress?.(stemBalance ? 77 : 70, 'master', 'Analyzing for master...');
+  onProgress?.(stemBalance ? 83 : 76, 'master', 'Analyzing for master...');
   await yieldToUI();
   const trackAnalysis = analyzeAndMasterTrack(
     masterInput,
-    mapProgress(onProgress, 'master', stemBalance ? 77 : 70, 3)
+    mapProgress(onProgress, 'master', stemBalance ? 83 : 76, 3)
   );
   await yieldToUI();
 
-  onProgress?.(stemBalance ? 81 : 75, 'master', 'Sonic character...');
+  onProgress?.(stemBalance ? 86 : 80, 'master', 'Sonic character...');
   await yieldToUI();
   const character = detectSonicCharacter(masterInput);
   const profile = getProcessingProfile(character.character, character.traits);
@@ -633,13 +667,13 @@ export async function runAssemblyLine(
   }
 
   throwIfAborted(signal);
-  onProgress?.(stemBalance ? 84 : 80, 'master', `Mastering for ${delivery.name}...`);
+  onProgress?.(stemBalance ? 88 : 83, 'master', `Mastering for ${delivery.name}...`);
   await yieldToUI();
   const masteringStats = await applyMasteringChain(
     masterInput,
     trackAnalysis.analysis,
     masterTarget,
-    mapProgress(onProgress, 'master', stemBalance ? 84 : 80, 12),
+    mapProgress(onProgress, 'master', stemBalance ? 88 : 83, 10),
     approach
   );
   await yieldToUI();
@@ -654,6 +688,7 @@ export async function runAssemblyLine(
       hitMaker
         ? `Smart Enhance mastering (${enhanceCharacter ?? 'adaptive'} · intensity ${Math.round(enhanceIntensity * 100)}%)`
         : 'Transparent mastering profile',
+      producerPass ? 'Producer Pass intangibles baked in before master' : 'No Producer Pass',
       ...trackAnalysis.recommendations.map((r) => r.description).slice(0, 4),
     ],
   });
@@ -680,6 +715,7 @@ export async function runAssemblyLine(
     vocalPocket ? 'vocal pocket' : null,
     studioTune ? 'studio tune' : null,
     hitMaker ? 'enhance' : null,
+    producerPass ? 'producer pass' : null,
     'master',
     'deliver',
   ].filter(Boolean);

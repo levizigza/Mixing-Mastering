@@ -2031,6 +2031,7 @@ export function useProAudioEngine() {
     hitMaker?: boolean;
     studioTune?: boolean;
     stemBalance?: boolean;
+    producerPass?: boolean;
     streamingTarget?: string;
   }) => {
     assemblyAbortRef.current?.abort();
@@ -2040,6 +2041,7 @@ export function useProAudioEngine() {
     const useHitMaker = opts?.hitMaker !== false;
     const useStudioTune = opts?.studioTune !== false;
     const useStemBalance = opts?.stemBalance === true;
+    const useProducerPass = opts?.producerPass !== false;
 
     setIsAssemblyLine(true);
     setAssemblyProgress(0);
@@ -2063,6 +2065,7 @@ export function useProAudioEngine() {
         hitMaker: useHitMaker,
         studioTune: useStudioTune,
         stemBalance: useStemBalance,
+        producerPass: useProducerPass,
         streamingTarget: (opts?.streamingTarget as import('@/lib/streaming-targets').StreamingPlatformId) || 'spotify',
         onProgress: (pct, stageId: AssemblyStageId, message) => {
           assemblyProgressPendingRef.current = {

@@ -19,6 +19,7 @@ import {
   Factory,
   Sparkles,
   Layers,
+  Disc3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { StemType } from '@/types/audio';
@@ -42,6 +43,7 @@ interface AudioUploadProps {
     hitMaker?: boolean;
     studioTune?: boolean;
     stemBalance?: boolean;
+    producerPass?: boolean;
     streamingTarget?: string;
   }) => void;
   onCancelAssemblyLine?: () => void;
@@ -255,6 +257,7 @@ export default function AudioUpload({
   const [hitMakerEnabled, setHitMakerEnabled] = useState(true);
   const [studioTuneEnabled, setStudioTuneEnabled] = useState(true);
   const [stemBalanceEnabled, setStemBalanceEnabled] = useState(false);
+  const [producerPassEnabled, setProducerPassEnabled] = useState(true);
   const [streamingTarget, setStreamingTarget] = useState<StreamingPlatformId>('spotify');
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
@@ -334,9 +337,10 @@ export default function AudioUpload({
       hitMaker: hitMakerEnabled,
       studioTune: studioTuneEnabled,
       stemBalance: stemBalanceEnabled,
+      producerPass: producerPassEnabled,
       streamingTarget,
     });
-  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled, stemBalanceEnabled, streamingTarget]);
+  }, [assemblyFile, onAssemblyLine, isAssemblyLine, hitMakerEnabled, studioTuneEnabled, stemBalanceEnabled, producerPassEnabled, streamingTarget]);
 
   const clearAssemblyFile = useCallback(() => {
     setAssemblyFile(null);
@@ -642,6 +646,46 @@ export default function AudioUpload({
                   }}
                 >
                   {hitMakerEnabled ? 'AUTO' : 'OFF'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProducerPassEnabled((v) => !v)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md border transition-all text-left"
+                style={
+                  producerPassEnabled
+                    ? {
+                        borderColor: '#fb718566',
+                        background: 'rgba(251, 113, 133, 0.12)',
+                      }
+                    : { borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.25)' }
+                }
+              >
+                <Disc3
+                  size={14}
+                  className="shrink-0"
+                  style={{ color: producerPassEnabled ? '#fb7185' : '#6b7280' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="text-[10px] font-display tracking-wider"
+                    style={{ color: producerPassEnabled ? '#fda4af' : '#9ca3af' }}
+                  >
+                    PRODUCER PASS {producerPassEnabled ? 'ON' : 'OFF'}
+                  </p>
+                  <p className="text-[8px] font-mono text-studio-muted leading-snug">
+                    Intangibles · multi-listen taste polish for radio
+                  </p>
+                </div>
+                <span
+                  className="text-[8px] font-mono px-1.5 py-0.5 rounded border shrink-0"
+                  style={{
+                    color: producerPassEnabled ? '#fda4af' : '#6b7280',
+                    borderColor: producerPassEnabled ? '#fb718555' : 'rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {producerPassEnabled ? 'TASTE' : 'OFF'}
                 </span>
               </button>
 
