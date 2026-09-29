@@ -9,6 +9,11 @@ import { applyMasteringChain } from '@/lib/mastering-chain';
 import { detectSonicCharacter, getProcessingProfile } from '@/lib/sonic-character';
 import { applySmartEnhance, smartEnhanceMasteringBoost } from '@/lib/hit-maker';
 import { applyProducerPass } from '@/lib/producer-pass';
+import {
+  applyClarityLock,
+  claritySafeMasteringApproach,
+  measureClarity,
+} from '@/lib/mix-clarity';
 import { runAutotuneStation } from '@/lib/autotune-station';
 import { applyResonanceCleanup } from '@/lib/resonance-eq';
 import { applyVocalPocket } from '@/lib/vocal-pocket';
@@ -28,6 +33,7 @@ export type AssemblyStageId =
   | 'tune'
   | 'hit'
   | 'producer'
+  | 'clarity'
   | 'master'
   | 'deliver'
   | 'done';
@@ -43,6 +49,7 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   tune: 'Studio Tune',
   hit: 'Smart Enhance',
   producer: 'Producer Pass',
+  clarity: 'Clarity Lock',
   master: 'Master',
   deliver: 'Deliver',
   done: 'Done',
@@ -578,16 +585,16 @@ export async function runAssemblyLine(
   }
 
   // ── 10. Producer Pass (intangibles / radio taste) ────────────
-  let masterInput = afterEnhance;
+  let afterProducer = afterEnhance;
   if (producerPass) {
     throwIfAborted(signal);
-    onProgress?.(stemBalance ? 74 : 66, 'producer', 'Producer Pass — listening for intangibles...');
+    onProgress?.(stemBalance ? 72 : 64, 'producer', 'Producer Pass — listening for intangibles...');
     await yieldToUI();
     const produced = await applyProducerPass(afterEnhance, sections, {
-      onProgress: mapProgress(onProgress, 'producer', stemBalance ? 74 : 66, 8),
+      onProgress: mapProgress(onProgress, 'producer', stemBalance ? 72 : 64, 6),
       signal,
     });
-    masterInput = produced.buffer;
+    afterProducer = produced.buffer;
     await yieldToUI();
     stageNotes.push({
       stage: 'producer',
@@ -602,17 +609,37 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 11. Master (streaming-aware) ─────────────────────────────
+  // ── 11. Clarity Lock (always on — permanent quality gate) ────
   throwIfAborted(signal);
-  onProgress?.(stemBalance ? 83 : 76, 'master', 'Analyzing for master...');
+  onProgress?.(stemBalance ? 79 : 72, 'clarity', 'Clarity Lock — permanent mud/presence gate...');
+  await yieldToUI();
+  const clarity = await applyClarityLock(
+    afterProducer,
+    mapProgress(onProgress, 'clarity', stemBalance ? 79 : 72, 5)
+  );
+  const masterInput = clarity.buffer;
+  const clarityMetrics = clarity.after;
+  await yieldToUI();
+  stageNotes.push({
+    stage: 'clarity',
+    label: ASSEMBLY_STAGE_LABELS.clarity,
+    notes: [
+      'Always-on quality gate — subtractive mud carve, no bass/warmth boosts.',
+      ...clarity.notes,
+    ],
+  });
+
+  // ── 12. Master (streaming-aware, clarity-capped) ─────────────
+  throwIfAborted(signal);
+  onProgress?.(stemBalance ? 85 : 78, 'master', 'Analyzing for master...');
   await yieldToUI();
   const trackAnalysis = analyzeAndMasterTrack(
     masterInput,
-    mapProgress(onProgress, 'master', stemBalance ? 83 : 76, 3)
+    mapProgress(onProgress, 'master', stemBalance ? 85 : 78, 3)
   );
   await yieldToUI();
 
-  onProgress?.(stemBalance ? 86 : 80, 'master', 'Sonic character...');
+  onProgress?.(stemBalance ? 88 : 82, 'master', 'Sonic character...');
   await yieldToUI();
   const character = detectSonicCharacter(masterInput);
   const profile = getProcessingProfile(character.character, character.traits);
@@ -662,22 +689,30 @@ export async function runAssemblyLine(
     approach.harmonicExcitement *= 0.6;
   }
   if (hasIssue(diagnosis.issues, 'mud', 'medium')) {
-    approach.lowEndBoost = Math.min(approach.lowEndBoost, 0.25);
-    approach.analogWarmth *= 0.7;
+    approach.lowEndBoost = Math.min(approach.lowEndBoost, 0.15);
+    approach.analogWarmth *= 0.4;
+  }
+  // Permanent: measured clarity metrics cap low-end / warmth so master cannot re-muddy
+  approach = claritySafeMasteringApproach(approach, clarityMetrics);
+  // Also respect pre-producer measurement if diagnosis flagged mud
+  if (diagnosis.mudRatio > 0.3) {
+    approach.lowEndBoost = Math.min(approach.lowEndBoost, 0.1);
+    approach.analogWarmth = Math.min(approach.analogWarmth, 0.12);
   }
 
   throwIfAborted(signal);
-  onProgress?.(stemBalance ? 88 : 83, 'master', `Mastering for ${delivery.name}...`);
+  onProgress?.(stemBalance ? 90 : 86, 'master', `Mastering for ${delivery.name}...`);
   await yieldToUI();
   const masteringStats = await applyMasteringChain(
     masterInput,
     trackAnalysis.analysis,
     masterTarget,
-    mapProgress(onProgress, 'master', stemBalance ? 88 : 83, 10),
+    mapProgress(onProgress, 'master', stemBalance ? 90 : 86, 8),
     approach
   );
   await yieldToUI();
 
+  const finalClarity = measureClarity(masteringStats.buffer);
   stageNotes.push({
     stage: 'master',
     label: ASSEMBLY_STAGE_LABELS.master,
@@ -685,11 +720,13 @@ export async function runAssemblyLine(
       `Delivery: ${delivery.name} → ${masterTarget} LUFS · TP ≤ ${delivery.truePeak} dBTP`,
       `Character: ${character.character} (${Math.round(character.confidence * 100)}%)`,
       `Final ${masteringStats.finalLUFS.toFixed(1)} LUFS · TP ${masteringStats.truePeak.toFixed(1)} dBTP`,
+      `Clarity-safe master · mud ${finalClarity.mudRatio.toFixed(2)} · clarity ${finalClarity.clarity.toFixed(2)}`,
+      `Low boost capped ${approach.lowEndBoost.toFixed(2)} · warmth ${approach.analogWarmth.toFixed(2)}`,
       hitMaker
         ? `Smart Enhance mastering (${enhanceCharacter ?? 'adaptive'} · intensity ${Math.round(enhanceIntensity * 100)}%)`
         : 'Transparent mastering profile',
-      producerPass ? 'Producer Pass intangibles baked in before master' : 'No Producer Pass',
-      ...trackAnalysis.recommendations.map((r) => r.description).slice(0, 4),
+      producerPass ? 'Producer Pass intangibles baked in before clarity lock' : 'No Producer Pass',
+      ...trackAnalysis.recommendations.map((r) => r.description).slice(0, 3),
     ],
   });
 
@@ -716,6 +753,7 @@ export async function runAssemblyLine(
     studioTune ? 'studio tune' : null,
     hitMaker ? 'enhance' : null,
     producerPass ? 'producer pass' : null,
+    'clarity lock',
     'master',
     'deliver',
   ].filter(Boolean);
@@ -724,6 +762,7 @@ export async function runAssemblyLine(
     label: ASSEMBLY_STAGE_LABELS.done,
     notes: [
       `Full auto: ${pathBits.join(' → ')}.`,
+      'Clarity Lock is always on — muddy/quiet takes are rejected before master.',
       'Original muted · Final unmuted — use Swap A/B to compare.',
     ],
   });

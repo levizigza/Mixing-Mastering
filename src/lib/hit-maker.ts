@@ -369,8 +369,8 @@ export async function applySmartEnhance(
     notes.push('Transient punch skipped (soft/intimate material)');
   }
 
-  const wetMix = (0.1 + recipe.density * 0.22) * I;
-  if (wetMix > 0.06) {
+  const wetMix = Math.min(0.18, (0.06 + recipe.density * 0.14) * I);
+  if (wetMix > 0.05) {
     const paraL = compress(L, sr, -20, 2.8 + recipe.density, 0.015, 0.14, 1.8 * recipe.density);
     const paraR = compress(R, sr, -20, 2.8 + recipe.density, 0.015, 0.14, 1.8 * recipe.density);
     for (let i = 0; i < len; i++) {
@@ -399,22 +399,34 @@ export async function applySmartEnhance(
   onProgress?.(78, 'Smart Enhance: tone polish...');
   await new Promise((r) => setTimeout(r, 0));
 
-  if (recipe.warmth * I > 0.25) {
-    const warmDb = 0.9 * recipe.warmth * I;
-    L = new Float32Array(processBiquad(L, calcLowShelf(180, warmDb, 0.7, sr)));
-    R = new Float32Array(processBiquad(R, calcLowShelf(180, warmDb, 0.7, sr)));
-    notes.push(`Warmth shelf +${warmDb.toFixed(1)} dB`);
-  }
-  if (recipe.lowShelf * I > 0.2 && analysis.traits.lowEndWeight < 0.55) {
-    const lowDb = 0.8 * recipe.lowShelf * I;
-    L = new Float32Array(processBiquad(L, calcLowShelf(90, lowDb, 0.7, sr)));
-    R = new Float32Array(processBiquad(R, calcLowShelf(90, lowDb, 0.7, sr)));
+  // Clarity-first: never re-boost low-mids / subs on material that already has mud.
+  // Warmth & low shelves were the main reason Enhance undid its own mud cuts.
+  const muddy = diagnosis.mudRatio > 0.28 || analysis.traits.warmth > 0.62;
+  const thinLow = analysis.traits.lowEndWeight < 0.35 && !muddy;
+
+  if (!muddy && recipe.warmth * I > 0.35) {
+    // High shelf of warmth only — keep it out of the 200–400 Hz mud zone
+    const warmDb = Math.min(0.55, 0.45 * recipe.warmth * I);
+    L = new Float32Array(processBiquad(L, calcLowShelf(110, warmDb, 0.7, sr)));
+    R = new Float32Array(processBiquad(R, calcLowShelf(110, warmDb, 0.7, sr)));
+    notes.push(`Warmth shelf +${warmDb.toFixed(1)} dB @110 Hz (clarity-safe)`);
+  } else if (muddy) {
+    notes.push('Warmth shelf skipped — mix already muddy / warm');
   }
 
-  const presDb = 1.5 * recipe.presence * I;
+  if (thinLow && recipe.lowShelf * I > 0.25) {
+    const lowDb = Math.min(0.55, 0.45 * recipe.lowShelf * I);
+    L = new Float32Array(processBiquad(L, calcLowShelf(70, lowDb, 0.7, sr)));
+    R = new Float32Array(processBiquad(R, calcLowShelf(70, lowDb, 0.7, sr)));
+    notes.push(`Low shelf +${lowDb.toFixed(1)} dB (thin low end only)`);
+  } else {
+    notes.push('Low shelf skipped — protects clarity');
+  }
+
+  const presDb = Math.min(1.2, 1.1 * recipe.presence * I);
   L = new Float32Array(processBiquad(L, calcPeaking(2800, presDb, 1.3, sr)));
   R = new Float32Array(processBiquad(R, calcPeaking(2800, presDb, 1.3, sr)));
-  const airDb = 1.2 * recipe.air * I;
+  const airDb = Math.min(1.0, 0.95 * recipe.air * I);
   L = new Float32Array(processBiquad(L, calcHighShelf(11000, airDb, 0.6, sr)));
   R = new Float32Array(processBiquad(R, calcHighShelf(11000, airDb, 0.6, sr)));
   notes.push(`Presence +${presDb.toFixed(1)} · air +${airDb.toFixed(1)}`);
@@ -474,13 +486,14 @@ export function smartEnhanceMasteringBoost(
     ...base,
     targetLUFS: recipe.lufsBias,
     truePeakCeiling: Math.min(base.truePeakCeiling, -1),
-    multibandAggression: Math.min(0.7, base.multibandAggression * (0.8 + intensity * 0.5)),
-    stereoWidenAmount: Math.min(0.65, base.stereoWidenAmount * (0.85 + recipe.air * 0.4)),
-    harmonicExcitement: Math.min(0.4, base.harmonicExcitement * 0.8 + recipe.warmth * 0.15 * intensity),
-    airBoost: Math.min(2.0, base.airBoost + recipe.air * 0.4 * intensity),
-    busCompGlue: Math.min(0.65, base.busCompGlue * (0.85 + recipe.density * 0.4)),
-    lowEndBoost: Math.min(1.6, base.lowEndBoost + recipe.lowShelf * 0.3 * intensity),
-    analogWarmth: Math.min(0.55, base.analogWarmth + recipe.warmth * 0.25 * intensity),
+    multibandAggression: Math.min(0.55, base.multibandAggression * (0.75 + intensity * 0.35)),
+    stereoWidenAmount: Math.min(0.55, base.stereoWidenAmount * (0.85 + recipe.air * 0.3)),
+    // Cap harmonics / warmth / low end — these were re-muddying masters
+    harmonicExcitement: Math.min(0.3, base.harmonicExcitement * 0.7 + recipe.warmth * 0.08 * intensity),
+    airBoost: Math.min(1.6, base.airBoost + recipe.air * 0.3 * intensity),
+    busCompGlue: Math.min(0.5, base.busCompGlue * (0.8 + recipe.density * 0.3)),
+    lowEndBoost: Math.min(0.45, base.lowEndBoost * 0.5 + recipe.lowShelf * 0.15 * intensity),
+    analogWarmth: Math.min(0.28, base.analogWarmth * 0.6 + recipe.warmth * 0.12 * intensity),
   };
 }
 

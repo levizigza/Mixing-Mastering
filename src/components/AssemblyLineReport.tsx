@@ -26,6 +26,7 @@ const STAGE_ORDER: AssemblyStageId[] = [
   'tune',
   'hit',
   'producer',
+  'clarity',
   'master',
   'deliver',
   'done',

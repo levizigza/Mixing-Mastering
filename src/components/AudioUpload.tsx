@@ -675,7 +675,7 @@ export default function AudioUpload({
                     PRODUCER PASS {producerPassEnabled ? 'ON' : 'OFF'}
                   </p>
                   <p className="text-[8px] font-mono text-studio-muted leading-snug">
-                    Intangibles · clarity & pocket, level-matched
+                    Intangibles · clarity-gated · Clarity Lock always follows
                   </p>
                 </div>
                 <span

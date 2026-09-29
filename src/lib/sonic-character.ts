@@ -229,7 +229,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 25, strength: 32, humanize: 60, formantPreserve: 85 },
         cinematicSettings: { depth: 20, width: 22, impact: 15, dynamics: 18, warmth: 10, shimmer: 18, presence: 18 },
         backgroundEnhancement: { harmonies: true, harmonyVolume: 0.06, harmonyIntervals: [4, 7], ambientPad: true, padVolume: 0.04, padBrightness: 0.5, padAttack: 2.0, texture: true, textureVolume: 0.02, textureType: 'shimmer', adlibs: true, adlibVolume: 0.04 },
-        masteringApproach: { targetLUFS: -12, truePeakCeiling: -0.5, multibandAggression: 0.5, stereoWidenAmount: 0.5, harmonicExcitement: 0.35, lowEndBoost: 1.0, airBoost: 1.5, busCompGlue: 0.55, analogWarmth: 0.4 },
+        masteringApproach: { targetLUFS: -12, truePeakCeiling: -0.5, multibandAggression: 0.45, stereoWidenAmount: 0.45, harmonicExcitement: 0.28, lowEndBoost: 0.35, airBoost: 1.2, busCompGlue: 0.45, analogWarmth: 0.22 },
       };
 
     case 'soulful':
@@ -239,7 +239,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 15, strength: 25, humanize: 75, formantPreserve: 90 },
         cinematicSettings: { depth: 12, width: 12, impact: 8, dynamics: 12, warmth: 15, shimmer: 10, presence: 15 },
         backgroundEnhancement: { harmonies: true, harmonyVolume: 0.05, harmonyIntervals: [3, 7], ambientPad: false, padVolume: 0, padBrightness: 0.3, padAttack: 1.0, texture: true, textureVolume: 0.02, textureType: 'vinyl', adlibs: false, adlibVolume: 0 },
-        masteringApproach: { targetLUFS: -13, truePeakCeiling: -1, multibandAggression: 0.3, stereoWidenAmount: 0.25, harmonicExcitement: 0.25, lowEndBoost: 0.5, airBoost: 0.5, busCompGlue: 0.45, analogWarmth: 0.6 },
+        masteringApproach: { targetLUFS: -13, truePeakCeiling: -1, multibandAggression: 0.28, stereoWidenAmount: 0.25, harmonicExcitement: 0.2, lowEndBoost: 0.25, airBoost: 0.5, busCompGlue: 0.4, analogWarmth: 0.28 },
       };
 
     case 'minimal':
@@ -249,7 +249,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 28, strength: 30, humanize: 60, formantPreserve: 85 },
         cinematicSettings: { depth: 18, width: 18, impact: 12, dynamics: 20, warmth: 8, shimmer: 15, presence: 12 },
         backgroundEnhancement: { harmonies: false, harmonyVolume: 0, harmonyIntervals: [], ambientPad: true, padVolume: 0.03, padBrightness: 0.3, padAttack: 3.0, texture: true, textureVolume: 0.02, textureType: 'air', adlibs: true, adlibVolume: 0.04 },
-        masteringApproach: { targetLUFS: -13, truePeakCeiling: -0.5, multibandAggression: 0.35, stereoWidenAmount: 0.35, harmonicExcitement: 0.15, lowEndBoost: 1.5, airBoost: 0.8, busCompGlue: 0.35, analogWarmth: 0.25 },
+        masteringApproach: { targetLUFS: -13, truePeakCeiling: -0.5, multibandAggression: 0.3, stereoWidenAmount: 0.3, harmonicExcitement: 0.12, lowEndBoost: 0.4, airBoost: 0.8, busCompGlue: 0.3, analogWarmth: 0.15 },
       };
 
     case 'aggressive':
@@ -259,7 +259,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 30, strength: 28, humanize: 50, formantPreserve: 75 },
         cinematicSettings: { depth: 8, width: 15, impact: 18, dynamics: 12, warmth: 6, shimmer: 6, presence: 15 },
         backgroundEnhancement: { harmonies: false, harmonyVolume: 0, harmonyIntervals: [], ambientPad: false, padVolume: 0, padBrightness: 0, padAttack: 0, texture: false, textureVolume: 0, textureType: 'air', adlibs: false, adlibVolume: 0 },
-        masteringApproach: { targetLUFS: -10, truePeakCeiling: -0.3, multibandAggression: 0.65, stereoWidenAmount: 0.4, harmonicExcitement: 0.5, lowEndBoost: 1.5, airBoost: 2.0, busCompGlue: 0.65, analogWarmth: 0.2 },
+        masteringApproach: { targetLUFS: -10, truePeakCeiling: -0.3, multibandAggression: 0.5, stereoWidenAmount: 0.35, harmonicExcitement: 0.35, lowEndBoost: 0.45, airBoost: 1.4, busCompGlue: 0.5, analogWarmth: 0.15 },
       };
 
     case 'atmospheric':
@@ -269,7 +269,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 14, strength: 22, humanize: 78, formantPreserve: 90 },
         cinematicSettings: { depth: 22, width: 22, impact: 10, dynamics: 18, warmth: 12, shimmer: 20, presence: 12 },
         backgroundEnhancement: { harmonies: true, harmonyVolume: 0.05, harmonyIntervals: [7, 12], ambientPad: true, padVolume: 0.04, padBrightness: 0.45, padAttack: 4.0, texture: true, textureVolume: 0.03, textureType: 'shimmer', adlibs: true, adlibVolume: 0.03 },
-        masteringApproach: { targetLUFS: -14, truePeakCeiling: -1, multibandAggression: 0.25, stereoWidenAmount: 0.6, harmonicExcitement: 0.2, lowEndBoost: 0.5, airBoost: 1.2, busCompGlue: 0.25, analogWarmth: 0.4 },
+        masteringApproach: { targetLUFS: -14, truePeakCeiling: -1, multibandAggression: 0.22, stereoWidenAmount: 0.5, harmonicExcitement: 0.15, lowEndBoost: 0.2, airBoost: 1.0, busCompGlue: 0.22, analogWarmth: 0.2 },
       };
 
     case 'gospel':
@@ -279,7 +279,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 18, strength: 28, humanize: 68, formantPreserve: 88 },
         cinematicSettings: { depth: 18, width: 18, impact: 12, dynamics: 15, warmth: 12, shimmer: 15, presence: 18 },
         backgroundEnhancement: { harmonies: true, harmonyVolume: 0.07, harmonyIntervals: [3, 7, 12], ambientPad: true, padVolume: 0.04, padBrightness: 0.35, padAttack: 2.5, texture: false, textureVolume: 0, textureType: 'air', adlibs: true, adlibVolume: 0.04 },
-        masteringApproach: { targetLUFS: -13, truePeakCeiling: -0.5, multibandAggression: 0.4, stereoWidenAmount: 0.45, harmonicExcitement: 0.3, lowEndBoost: 0.8, airBoost: 1.2, busCompGlue: 0.45, analogWarmth: 0.5 },
+        masteringApproach: { targetLUFS: -13, truePeakCeiling: -0.5, multibandAggression: 0.35, stereoWidenAmount: 0.4, harmonicExcitement: 0.22, lowEndBoost: 0.3, airBoost: 1.0, busCompGlue: 0.4, analogWarmth: 0.25 },
       };
 
     case 'moody':
@@ -289,7 +289,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 20, strength: 28, humanize: 65, formantPreserve: 85 },
         cinematicSettings: { depth: 20, width: 18, impact: 12, dynamics: 18, warmth: 15, shimmer: 12, presence: 15 },
         backgroundEnhancement: { harmonies: true, harmonyVolume: 0.05, harmonyIntervals: [3, 7], ambientPad: true, padVolume: 0.04, padBrightness: 0.3, padAttack: 3.5, texture: true, textureVolume: 0.02, textureType: 'rain', adlibs: true, adlibVolume: 0.04 },
-        masteringApproach: { targetLUFS: -13, truePeakCeiling: -0.5, multibandAggression: 0.35, stereoWidenAmount: 0.45, harmonicExcitement: 0.25, lowEndBoost: 1.0, airBoost: 0.8, busCompGlue: 0.4, analogWarmth: 0.5 },
+        masteringApproach: { targetLUFS: -13, truePeakCeiling: -0.5, multibandAggression: 0.3, stereoWidenAmount: 0.4, harmonicExcitement: 0.18, lowEndBoost: 0.35, airBoost: 0.7, busCompGlue: 0.35, analogWarmth: 0.22 },
       };
 
     case 'hitmaker':
@@ -299,7 +299,7 @@ export function getProcessingProfile(character: SonicCharacter, traits: Characte
         pitchSettings: { ...defaultPitchSettings, speed: 24, strength: 32, humanize: 58, formantPreserve: 82 },
         cinematicSettings: { depth: 15, width: 18, impact: 12, dynamics: 12, warmth: 10, shimmer: 14, presence: 18 },
         backgroundEnhancement: { harmonies: true, harmonyVolume: 0.06, harmonyIntervals: [4, 7], ambientPad: true, padVolume: 0.03, padBrightness: 0.45, padAttack: 1.5, texture: true, textureVolume: 0.015, textureType: 'warmhiss', adlibs: true, adlibVolume: 0.05 },
-        masteringApproach: { targetLUFS: -11, truePeakCeiling: -0.5, multibandAggression: 0.5, stereoWidenAmount: 0.45, harmonicExcitement: 0.35, lowEndBoost: 1.0, airBoost: 1.2, busCompGlue: 0.55, analogWarmth: 0.35 },
+        masteringApproach: { targetLUFS: -11, truePeakCeiling: -0.5, multibandAggression: 0.42, stereoWidenAmount: 0.4, harmonicExcitement: 0.28, lowEndBoost: 0.35, airBoost: 1.0, busCompGlue: 0.45, analogWarmth: 0.2 },
       };
   }
 }

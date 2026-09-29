@@ -671,9 +671,13 @@ export async function applyMasteringChain(
   onProgress?.(54, 'Tonal shaping EQ...');
   await new Promise((r) => setTimeout(r, 0));
   {
-    const lowBoost = params.lowEndBoost + (tilt === 'dark' ? -0.5 : tilt === 'bright' ? 0.6 : 0);
+    // Cap low boost hard — stacking shelves here was a primary mud source.
+    const lowBoost = Math.min(
+      0.7,
+      params.lowEndBoost + (tilt === 'dark' ? -0.3 : tilt === 'bright' ? 0.35 : 0)
+    );
     if (Math.abs(lowBoost) > 0.15) {
-      const ls = calcLowShelfCoeffs(80, Math.max(-1.5, Math.min(2.5, lowBoost)), 0.7, sr);
+      const ls = calcLowShelfCoeffs(70, Math.max(-1.0, Math.min(0.7, lowBoost)), 0.7, sr);
       L = processBiquad(L, ls);
       R = processBiquad(R, ls);
     }
