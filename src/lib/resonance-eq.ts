@@ -154,7 +154,7 @@ function findResonancePeaks(
     const env = Math.max(envelope[k], 1e-12);
     const excess = mag[k] / env;
     // Local peak + meaningfully above envelope
-    if (mag[k] > mag[k - 1] && mag[k] >= mag[k + 1] && excess > 1.55) {
+    if (mag[k] > mag[k - 1] && mag[k] >= mag[k + 1] && excess > 1.85) {
       const freq = (k * sr) / fftSize;
       candidates.push({ bin: k, excess, freq });
     }
@@ -167,14 +167,14 @@ function findResonancePeaks(
   for (const c of candidates) {
     if (notches.length >= maxNotches) break;
     if (notches.some((n) => Math.abs(n.frequency - c.freq) < minSepHz)) continue;
-    // Map excess → cut depth (surgical, not destructive)
-    const cut = Math.min(5.5, Math.max(1.2, (c.excess - 1.4) * 3.2));
-    const Q = c.freq < 500 ? 4.5 : c.freq < 2000 ? 6 : 8;
+    // Cap depth — deep notches on a full mix remove musical tones
+    const cut = Math.min(2.4, Math.max(0.8, (c.excess - 1.55) * 2.0));
+    const Q = c.freq < 500 ? 4.0 : c.freq < 2000 ? 5.0 : 6.5;
     notches.push({ frequency: Math.round(c.freq), gainDb: -cut, Q });
   }
 
   notches.sort((a, b) => a.frequency - b.frequency);
-  return notches;
+  return notches.slice(0, 3); // max 3 notches on a full mix
 }
 
 async function applyNotchesOffline(

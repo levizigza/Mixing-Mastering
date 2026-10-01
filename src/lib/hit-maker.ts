@@ -344,24 +344,22 @@ export async function applySmartEnhance(
   onProgress?.(18, `Smart Enhance: ${analysis.character} cleanup...`);
   await new Promise((r) => setTimeout(r, 0));
 
-  const mudBase = diagnosis.mudRatio > 0.35 ? -2.8 : -1.8;
-  const mudAmount = mudBase * recipe.mudCut * I;
-  L = new Float32Array(processBiquad(L, calcHighpass(30, 0.707, sr)));
-  R = new Float32Array(processBiquad(R, calcHighpass(30, 0.707, sr)));
-  L = new Float32Array(processBiquad(L, calcPeaking(300, mudAmount, 0.9, sr)));
-  R = new Float32Array(processBiquad(R, calcPeaking(300, mudAmount, 0.9, sr)));
-  if (diagnosis.mudRatio > 0.28 || analysis.traits.warmth > 0.65) {
-    const box = -1.1 * recipe.mudCut * I;
-    L = new Float32Array(processBiquad(L, calcPeaking(480, box, 1.5, sr)));
-    R = new Float32Array(processBiquad(R, calcPeaking(480, box, 1.5, sr)));
+  // Corrective EQ owns the pipeline mud cut — Enhance must not restack 300 Hz.
+  // Only a tiny cleanup if diagnosis still shows severe mud after Correct.
+  if (diagnosis.mudRatio > 0.7) {
+    const mudAmount = Math.max(-0.9, -0.6 * recipe.mudCut * I);
+    L = new Float32Array(processBiquad(L, calcPeaking(320, mudAmount, 1.3, sr)));
+    R = new Float32Array(processBiquad(R, calcPeaking(320, mudAmount, 1.3, sr)));
+    notes.push(`Light clarity touch ${mudAmount.toFixed(1)} dB @320 (severe mud only)`);
+  } else {
+    notes.push('Mud cut skipped — Corrective EQ owns that band');
   }
-  notes.push(`Clarity EQ adapted to ${analysis.character} (${mudAmount.toFixed(1)} dB mud)`);
 
   onProgress?.(40, 'Smart Enhance: dynamics & punch...');
   await new Promise((r) => setTimeout(r, 0));
 
-  const punchDb = 2.0 * recipe.punch * I;
-  if (punchDb > 0.2) {
+  const punchDb = Math.min(1.1, 1.2 * recipe.punch * I);
+  if (punchDb > 0.25) {
     L = new Float32Array(enhanceTransients(L, sr, punchDb));
     R = new Float32Array(enhanceTransients(R, sr, punchDb));
     notes.push(`Transient punch +${punchDb.toFixed(1)} dB`);
@@ -369,10 +367,11 @@ export async function applySmartEnhance(
     notes.push('Transient punch skipped (soft/intimate material)');
   }
 
-  const wetMix = Math.min(0.18, (0.06 + recipe.density * 0.14) * I);
-  if (wetMix > 0.05) {
-    const paraL = compress(L, sr, -20, 2.8 + recipe.density, 0.015, 0.14, 1.8 * recipe.density);
-    const paraR = compress(R, sr, -20, 2.8 + recipe.density, 0.015, 0.14, 1.8 * recipe.density);
+  // Keep parallel density very light — heavy wet mix smeared into "mud"
+  const wetMix = Math.min(0.08, (0.03 + recipe.density * 0.08) * I);
+  if (wetMix > 0.04) {
+    const paraL = compress(L, sr, -18, 2.2 + recipe.density * 0.5, 0.02, 0.16, 1.0 * recipe.density);
+    const paraR = compress(R, sr, -18, 2.2 + recipe.density * 0.5, 0.02, 0.16, 1.0 * recipe.density);
     for (let i = 0; i < len; i++) {
       L[i] = L[i] * (1 - wetMix) + paraL[i] * wetMix;
       R[i] = R[i] * (1 - wetMix) + paraR[i] * wetMix;
@@ -401,34 +400,15 @@ export async function applySmartEnhance(
 
   // Clarity-first: never re-boost low-mids / subs on material that already has mud.
   // Warmth & low shelves were the main reason Enhance undid its own mud cuts.
-  const muddy = diagnosis.mudRatio > 0.28 || analysis.traits.warmth > 0.62;
-  const thinLow = analysis.traits.lowEndWeight < 0.35 && !muddy;
+  // No warmth / low shelves in Enhance — master owns tonal low end once.
+  notes.push('Warmth/low shelves skipped — master owns low-end tone');
 
-  if (!muddy && recipe.warmth * I > 0.35) {
-    // High shelf of warmth only — keep it out of the 200–400 Hz mud zone
-    const warmDb = Math.min(0.55, 0.45 * recipe.warmth * I);
-    L = new Float32Array(processBiquad(L, calcLowShelf(110, warmDb, 0.7, sr)));
-    R = new Float32Array(processBiquad(R, calcLowShelf(110, warmDb, 0.7, sr)));
-    notes.push(`Warmth shelf +${warmDb.toFixed(1)} dB @110 Hz (clarity-safe)`);
-  } else if (muddy) {
-    notes.push('Warmth shelf skipped — mix already muddy / warm');
-  }
-
-  if (thinLow && recipe.lowShelf * I > 0.25) {
-    const lowDb = Math.min(0.55, 0.45 * recipe.lowShelf * I);
-    L = new Float32Array(processBiquad(L, calcLowShelf(70, lowDb, 0.7, sr)));
-    R = new Float32Array(processBiquad(R, calcLowShelf(70, lowDb, 0.7, sr)));
-    notes.push(`Low shelf +${lowDb.toFixed(1)} dB (thin low end only)`);
-  } else {
-    notes.push('Low shelf skipped — protects clarity');
-  }
-
-  const presDb = Math.min(1.2, 1.1 * recipe.presence * I);
-  L = new Float32Array(processBiquad(L, calcPeaking(2800, presDb, 1.3, sr)));
-  R = new Float32Array(processBiquad(R, calcPeaking(2800, presDb, 1.3, sr)));
-  const airDb = Math.min(1.0, 0.95 * recipe.air * I);
-  L = new Float32Array(processBiquad(L, calcHighShelf(11000, airDb, 0.6, sr)));
-  R = new Float32Array(processBiquad(R, calcHighShelf(11000, airDb, 0.6, sr)));
+  const presDb = Math.min(0.85, 0.75 * recipe.presence * I);
+  L = new Float32Array(processBiquad(L, calcPeaking(3000, presDb, 1.25, sr)));
+  R = new Float32Array(processBiquad(R, calcPeaking(3000, presDb, 1.25, sr)));
+  const airDb = Math.min(0.7, 0.65 * recipe.air * I);
+  L = new Float32Array(processBiquad(L, calcHighShelf(12000, airDb, 0.7, sr)));
+  R = new Float32Array(processBiquad(R, calcHighShelf(12000, airDb, 0.7, sr)));
   notes.push(`Presence +${presDb.toFixed(1)} · air +${airDb.toFixed(1)}`);
 
   let peak = 0;
@@ -492,8 +472,8 @@ export function smartEnhanceMasteringBoost(
     harmonicExcitement: Math.min(0.3, base.harmonicExcitement * 0.7 + recipe.warmth * 0.08 * intensity),
     airBoost: Math.min(1.6, base.airBoost + recipe.air * 0.3 * intensity),
     busCompGlue: Math.min(0.5, base.busCompGlue * (0.8 + recipe.density * 0.3)),
-    lowEndBoost: Math.min(0.45, base.lowEndBoost * 0.5 + recipe.lowShelf * 0.15 * intensity),
-    analogWarmth: Math.min(0.28, base.analogWarmth * 0.6 + recipe.warmth * 0.12 * intensity),
+    lowEndBoost: Math.min(0.3, base.lowEndBoost * 0.4 + recipe.lowShelf * 0.1 * intensity),
+    analogWarmth: Math.min(0.18, base.analogWarmth * 0.5 + recipe.warmth * 0.08 * intensity),
   };
 }
 

@@ -2039,9 +2039,10 @@ export function useProAudioEngine() {
     assemblyAbortRef.current = ac;
 
     const useHitMaker = opts?.hitMaker !== false;
-    const useStudioTune = opts?.studioTune !== false;
+    // Studio Tune / Producer Pass are opt-in (default false for mix coherence)
+    const useStudioTune = opts?.studioTune === true;
     const useStemBalance = opts?.stemBalance === true;
-    const useProducerPass = opts?.producerPass !== false;
+    const useProducerPass = opts?.producerPass === true;
 
     setIsAssemblyLine(true);
     setAssemblyProgress(0);

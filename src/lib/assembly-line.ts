@@ -229,17 +229,16 @@ function hasIssue(issues: PipelineIssue[], id: string, min: 'low' | 'medium' | '
 }
 
 function repairFromDiagnosis(d: PipelineDiagnosis): RepairSettings {
+  // Trust analyze settings — do NOT re-floor denoise/dehum (that was cutting music).
   const s = { ...d.repairSettings };
-  // Full cleanup on every track length — quality first (repair yields keep UI alive)
-  if (hasIssue(d.issues, 'noiseFloor', 'low')) s.denoise = Math.max(s.denoise, 48);
-  if (hasIssue(d.issues, 'clipping', 'medium')) s.declip = Math.max(s.declip, 60);
-  if (hasIssue(d.issues, 'clipping', 'high')) s.declip = 75;
-  s.declick = Math.max(s.declick, 40);
-  s.dehum = Math.max(s.dehum, 35);
-  if (hasIssue(d.issues, 'mud', 'medium')) {
-    s.deplosive = Math.max(s.deplosive, 45);
-    s.dereverb = Math.max(s.dereverb, 28);
-  }
+  if (hasIssue(d.issues, 'clipping', 'medium')) s.declip = Math.max(s.declip, 40);
+  if (hasIssue(d.issues, 'clipping', 'high')) s.declip = Math.max(s.declip, 55);
+  // Hard caps so repair can never gut a mix
+  s.denoise = Math.min(s.denoise, 32);
+  s.dehum = 0; // never notch 60/120/180 on a full mix by default
+  s.deplosive = 0;
+  s.dereverb = 0;
+  s.declick = Math.min(s.declick, 20);
   return s;
 }
 
@@ -252,26 +251,21 @@ async function applyCorrectiveEq(
   const notes: string[] = [];
   const filters: { type: BiquadFilterType; frequency: number; Q: number; gain: number }[] = [];
 
-  if (hasIssue(diagnosis.issues, 'mud', 'low')) {
-    const gain = hasIssue(diagnosis.issues, 'mud', 'high') ? -3.5 : -2.2;
-    filters.push({ type: 'peaking', frequency: 280, Q: 1.1, gain });
-    filters.push({ type: 'highpass', frequency: 35, Q: 0.7, gain: 0 });
-    notes.push(`Cut mud ~280 Hz (${gain} dB)`);
+  // Single pipeline owner of the ~300 Hz mud cut — only on HIGH severity.
+  // Medium/low used to stack −2…−3.5 dB here plus enhance/pocket/clarity/master.
+  if (hasIssue(diagnosis.issues, 'mud', 'high')) {
+    filters.push({ type: 'peaking', frequency: 300, Q: 1.25, gain: -1.4 });
+    notes.push('Mud carve −1.4 dB @300 Hz (high severity only)');
+  } else if (hasIssue(diagnosis.issues, 'mud', 'medium')) {
+    filters.push({ type: 'peaking', frequency: 300, Q: 1.3, gain: -0.8 });
+    notes.push('Mud carve −0.8 dB @300 Hz');
   }
-  if (hasIssue(diagnosis.issues, 'harshHf', 'low')) {
-    const gain = hasIssue(diagnosis.issues, 'harshHf', 'high') ? -3 : -1.8;
-    filters.push({ type: 'peaking', frequency: 4500, Q: 1.4, gain });
+  if (hasIssue(diagnosis.issues, 'harshHf', 'medium')) {
+    const gain = hasIssue(diagnosis.issues, 'harshHf', 'high') ? -1.8 : -1.0;
+    filters.push({ type: 'peaking', frequency: 4500, Q: 1.5, gain });
     notes.push(`Tame harshness ~4.5 kHz (${gain} dB)`);
   }
-  if (hasIssue(diagnosis.issues, 'lowDynamics', 'medium')) {
-    // Slight air restore when already crushed
-    filters.push({ type: 'highshelf', frequency: 10000, Q: 0.7, gain: 1.2 });
-    notes.push('Add slight air shelf for crushed dynamics');
-  }
-  if (diagnosis.estimatedLufs < -20) {
-    filters.push({ type: 'lowshelf', frequency: 120, Q: 0.7, gain: 1.0 });
-    notes.push('Gentle low shelf for quiet program');
-  }
+  // No HPF here (master owns 28 Hz). No quiet-program low shelf (classic mud source).
 
   if (filters.length === 0) {
     onProgress?.(100, 'No corrective EQ needed');
@@ -371,11 +365,13 @@ export async function runAssemblyLine(
     targetLUFS = -14,
     streamingTarget = 'spotify',
     hitMaker = true,
-    studioTune = true,
+    // Studio Tune on a full-mix mid channel pitch-shifts kick/bass with vocals — off by default
+    studioTune = false,
     resonanceCleanup = true,
     vocalPocket = true,
     stemBalance = false,
-    producerPass = true,
+    // Producer Pass is opt-in; Clarity Lock + restrained master own default quality
+    producerPass = false,
   } = options;
   const stageNotes: AssemblyStageNote[] = [];
   const delivery = getStreamingTarget(streamingTarget);
@@ -624,7 +620,7 @@ export async function runAssemblyLine(
     stage: 'clarity',
     label: ASSEMBLY_STAGE_LABELS.clarity,
     notes: [
-      'Always-on quality gate — subtractive mud carve, no bass/warmth boosts.',
+      'Quality gate — pass-through unless low-mids truly mask presence.',
       ...clarity.notes,
     ],
   });
@@ -762,7 +758,7 @@ export async function runAssemblyLine(
     label: ASSEMBLY_STAGE_LABELS.done,
     notes: [
       `Full auto: ${pathBits.join(' → ')}.`,
-      'Clarity Lock is always on — muddy/quiet takes are rejected before master.',
+      'Studio path: light repair · one mud owner · restrained master (no stacked cuts).',
       'Original muted · Final unmuted — use Swap A/B to compare.',
     ],
   });

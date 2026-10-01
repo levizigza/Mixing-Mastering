@@ -130,18 +130,18 @@ export async function applyVocalPocket(
     return { buffer, notes, vocalPresence };
   }
 
-  const amount = 0.35 + vocalPresence * 0.55; // 0.35–0.9
+  // Cap ride — heavy mid riding + mud carve was thinning body and feeling "cut out"
+  const amount = Math.min(0.42, 0.22 + vocalPresence * 0.28);
   onProgress?.(25, 'Riding center channel...');
   await yieldToUI();
 
   if (buffer.numberOfChannels < 2) {
-    const ridden = rideChannel(new Float32Array(buffer.getChannelData(0)), buffer.sampleRate, amount);
+    const ridden = rideChannel(new Float32Array(buffer.getChannelData(0)), buffer.sampleRate, amount * 0.7);
     const ctx = new OfflineAudioContext(1, ridden.length, buffer.sampleRate);
     const out = ctx.createBuffer(1, ridden.length, buffer.sampleRate);
     out.copyToChannel(new Float32Array(ridden), 0);
-    // Mild presence lift on mono
-    const lifted = await peakingFilter(out, 3200, 0.8 * amount, 1.1);
-    notes.push(`Mono vocal ride ×${amount.toFixed(2)} + presence +${(0.8 * amount).toFixed(1)} dB`);
+    const lifted = await peakingFilter(out, 3200, Math.min(0.55, 0.5 * amount), 1.2);
+    notes.push(`Mono vocal ride ×${(amount * 0.7).toFixed(2)} + presence +${(0.5 * amount).toFixed(1)} dB`);
     onProgress?.(100, 'Vocal pocket done');
     return { buffer: lifted, notes, vocalPresence };
   }
@@ -156,34 +156,25 @@ export async function applyVocalPocket(
     side[i] = (L[i] - R[i]) * 0.5;
   }
 
-  const riddenMid = rideChannel(mid, buffer.sampleRate, amount * 0.85);
-  notes.push(`Center vocal ride ×${(amount * 0.85).toFixed(2)}`);
+  const riddenMid = rideChannel(mid, buffer.sampleRate, amount * 0.55);
+  notes.push(`Center vocal ride ×${(amount * 0.55).toFixed(2)}`);
 
-  // Mild side carve around vocal presence so leads poke through
-  onProgress?.(55, 'Carving pocket around vocals...');
+  onProgress?.(55, 'Opening vocal presence (no mud stack)...');
   await yieldToUI();
   const ctxM = new OfflineAudioContext(1, len, buffer.sampleRate);
   const midBuf = ctxM.createBuffer(1, len, buffer.sampleRate);
   midBuf.copyToChannel(new Float32Array(riddenMid), 0);
-  // Dip competing mud in mid a touch, lift presence
-  let processedMid = await peakingFilter(midBuf, 280, -1.1 * amount, 1.3);
-  processedMid = await peakingFilter(processedMid, 3200, 1.0 * amount, 1.15);
-
-  const sideCtx = new OfflineAudioContext(1, len, buffer.sampleRate);
-  const sideBuf = sideCtx.createBuffer(1, len, buffer.sampleRate);
-  sideBuf.copyToChannel(new Float32Array(side), 0);
-  // Soften side energy in vocal presence band (reduces masking from wide pads/hats)
-  const carvedSide = await peakingFilter(sideBuf, 3000, -1.4 * amount, 1.4);
+  // Presence only — corrective EQ owns any 300 Hz mud cut
+  const processedMid = await peakingFilter(midBuf, 3200, Math.min(0.7, 0.85 * amount), 1.2);
 
   onProgress?.(85, 'Rebuilding stereo...');
   await yieldToUI();
   const m = processedMid.getChannelData(0);
-  const s = carvedSide.getChannelData(0);
   const outL = new Float32Array(len);
   const outR = new Float32Array(len);
   for (let i = 0; i < len; i++) {
-    outL[i] = m[i] + s[i];
-    outR[i] = m[i] - s[i];
+    outL[i] = m[i] + side[i];
+    outR[i] = m[i] - side[i];
   }
   const outCtx = new OfflineAudioContext(2, len, buffer.sampleRate);
   const out = outCtx.createBuffer(2, len, buffer.sampleRate);
@@ -191,8 +182,8 @@ export async function applyVocalPocket(
   out.copyToChannel(new Float32Array(outR), 1);
 
   notes.push(
-    `Presence +${(1.0 * amount).toFixed(1)} dB @ 3.2 kHz · mud −${(1.1 * amount).toFixed(1)} dB`,
-    `Side carve −${(1.4 * amount).toFixed(1)} dB @ 3 kHz for vocal pocket`
+    `Presence +${Math.min(0.7, 0.85 * amount).toFixed(1)} dB @ 3.2 kHz`,
+    'No side carve / no mid mud cut — preserves width and body'
   );
   onProgress?.(100, 'Vocal pocket done');
   return { buffer: out, notes, vocalPresence };

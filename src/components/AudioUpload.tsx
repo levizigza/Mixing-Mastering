@@ -255,9 +255,11 @@ export default function AudioUpload({
   const [assemblyDragOver, setAssemblyDragOver] = useState(false);
   const [assemblyFile, setAssemblyFile] = useState<File | null>(null);
   const [hitMakerEnabled, setHitMakerEnabled] = useState(true);
-  const [studioTuneEnabled, setStudioTuneEnabled] = useState(true);
+  // Off by default — pitch-shifting the full-mix mid channel hurts coherence
+  const [studioTuneEnabled, setStudioTuneEnabled] = useState(false);
   const [stemBalanceEnabled, setStemBalanceEnabled] = useState(false);
-  const [producerPassEnabled, setProducerPassEnabled] = useState(true);
+  // Opt-in polish; Clarity Lock + restrained master handle default quality
+  const [producerPassEnabled, setProducerPassEnabled] = useState(false);
   const [streamingTarget, setStreamingTarget] = useState<StreamingPlatformId>('spotify');
   const [selectedType, setSelectedType] = useState<StemType>('vocals');
   const [mode, setMode] = useState<UploadMode>('assembly');
@@ -555,7 +557,7 @@ export default function AudioUpload({
                     STUDIO TUNE {studioTuneEnabled ? 'ON' : 'OFF'}
                   </p>
                   <p className="text-[8px] font-mono text-studio-muted leading-snug">
-                    Natural pitch polish — keeps vibrato, not T-Pain
+                    Optional · mid-channel pitch — off by default for mix fidelity
                   </p>
                 </div>
                 <span
@@ -675,7 +677,7 @@ export default function AudioUpload({
                     PRODUCER PASS {producerPassEnabled ? 'ON' : 'OFF'}
                   </p>
                   <p className="text-[8px] font-mono text-studio-muted leading-snug">
-                    Intangibles · clarity-gated · Clarity Lock always follows
+                    Optional · light kick pocket + glue (off by default)
                   </p>
                 </div>
                 <span

@@ -77,35 +77,50 @@ function stereoImbalanceDb(buffer: AudioBuffer): number {
   return toDb(rl + 1e-12) - toDb(rr + 1e-12);
 }
 
-/** Crude band energy via simple IIR shelf approximation on mono mix. */
+/**
+ * Mud = low-mid (180–450 Hz) vs vocal/presence (1.5–5 kHz).
+ * Old metric (LP~200 / total) flagged every bass-heavy song as muddy
+ * and triggered destructive repair / stacked 280 Hz cuts.
+ */
 function bandEnergyRatio(buffer: AudioBuffer): { mud: number; harsh: number } {
   const sr = buffer.sampleRate;
   const L = buffer.getChannelData(0);
   const R = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : L;
-  let low = 0;
-  let mid = 0;
-  let high = 0;
+  const n = Math.min(buffer.length, Math.floor(sr * 60));
+  const aLo = Math.exp((-2 * Math.PI * 180) / sr);
+  const aMid = Math.exp((-2 * Math.PI * 450) / sr);
+  const aPresLo = Math.exp((-2 * Math.PI * 1500) / sr);
+  const aPresHi = Math.exp((-2 * Math.PI * 5000) / sr);
+  const aHarsh = Math.exp((-2 * Math.PI * 6000) / sr);
+  let lpLo = 0,
+    lpMid = 0,
+    lpPresLo = 0,
+    lpPresHi = 0,
+    lpHarsh = 0;
+  let lowMid = 0;
+  let presence = 0;
+  let harsh = 0;
   let total = 0;
-  // One-pole LP ~200 Hz and HP ~6 kHz approximations via EMA
-  const aLow = Math.exp((-2 * Math.PI * 200) / sr);
-  const aHigh = Math.exp((-2 * Math.PI * 6000) / sr);
-  let lp = 0;
-  let hpState = 0;
-  for (let i = 0; i < buffer.length; i++) {
+  for (let i = 0; i < n; i++) {
     const x = 0.5 * (L[i] + R[i]);
-    lp = aLow * lp + (1 - aLow) * x;
-    const hp = x - (aHigh * hpState + (1 - aHigh) * x);
-    hpState = x;
-    const e = x * x;
-    const eLow = lp * lp;
-    const eHigh = hp * hp;
-    total += e;
-    low += eLow;
-    high += eHigh;
-    mid += Math.max(0, e - eLow - eHigh);
+    lpLo = x + (lpLo - x) * aLo;
+    lpMid = x + (lpMid - x) * aMid;
+    lpPresLo = x + (lpPresLo - x) * aPresLo;
+    lpPresHi = x + (lpPresHi - x) * aPresHi;
+    lpHarsh = x + (lpHarsh - x) * aHarsh;
+    const mudBand = lpLo - lpMid;
+    const presBand = lpPresLo - lpPresHi;
+    const harshBand = x - lpHarsh;
+    lowMid += mudBand * mudBand;
+    presence += presBand * presBand;
+    harsh += harshBand * harshBand;
+    total += x * x;
   }
   if (total < 1e-12) return { mud: 0, harsh: 0 };
-  return { mud: low / total, harsh: high / total };
+  // Ratio > ~1.1 means low-mids outweigh presence (true mud), not "has bass"
+  const mudRatio = lowMid / (presence + 1e-12);
+  const mudScore = Math.max(0, Math.min(1, (mudRatio - 0.5) / 1.5));
+  return { mud: mudScore, harsh: harsh / total };
 }
 
 function analyzeEnergyContour(buffer: AudioBuffer, windowSeconds = 2): Float32Array {
@@ -262,23 +277,29 @@ function flagSections(
 }
 
 function buildRepairSettings(issues: PipelineIssue[]): RepairSettings {
-  const s = { ...defaultRepairSettings };
+  // Studio default: almost transparent. Never notch hum / gate music on every track.
+  const s: RepairSettings = {
+    denoise: 0,
+    declick: 12,
+    dehum: 0,
+    humFreq: 60,
+    deplosive: 0,
+    declip: 15,
+    dereverb: 0,
+  };
   const has = (id: PipelineIssueId) => issues.find((i) => i.id === id);
   const clip = has('clipping');
-  if (clip) s.declip = clip.severity === 'high' ? 75 : clip.severity === 'medium' ? 55 : 40;
+  if (clip) s.declip = clip.severity === 'high' ? 60 : clip.severity === 'medium' ? 40 : 25;
   const noise = has('noiseFloor');
-  if (noise) s.denoise = noise.severity === 'high' ? 70 : noise.severity === 'medium' ? 55 : 40;
-  else s.denoise = 30;
-  const mud = has('mud');
-  if (mud) {
-    s.deplosive = 55;
-    s.dereverb = Math.max(s.dereverb, 35);
+  if (noise) {
+    // Cap denoise — spectral subtract on a mix erases quiet musical detail
+    s.denoise = noise.severity === 'high' ? 32 : noise.severity === 'medium' ? 22 : 14;
   }
+  // Do NOT run deplosive/dereverb from a mud flag — that cuts kick/bass and ambience.
+  // Hum only if we somehow add an explicit hum issue later; default stays 0.
   if (has('loudness')?.severity === 'high') {
-    s.declip = Math.max(s.declip, 50);
+    s.declip = Math.max(s.declip, 35);
   }
-  s.declick = Math.max(35, s.declick);
-  s.dehum = 40;
   return s;
 }
 
@@ -342,11 +363,12 @@ export async function analyzePipeline(
       message: `Low RMS (${rmsDb.toFixed(1)} dB) — quiet / noisy floor risk`,
     });
   }
-  if (mud > 0.42) {
+  // mudScore is normalized 0–1 from low-mid/presence; only flag real boxiness
+  if (mud > 0.55) {
     issues.push({
       id: 'mud',
-      severity: mud > 0.55 ? 'high' : 'medium',
-      message: 'Excess low-mid energy — mud / boxiness',
+      severity: mud > 0.75 ? 'high' : 'medium',
+      message: 'Low-mids masking presence — possible mud / boxiness',
     });
   }
   if (harsh > 0.28) {

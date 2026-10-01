@@ -12,13 +12,13 @@ export interface RepairSettings {
 }
 
 export const defaultRepairSettings: RepairSettings = {
-  denoise: 45,
-  declick: 40,
-  dehum: 35,
+  denoise: 0,
+  declick: 12,
+  dehum: 0,
   humFreq: 60,
-  deplosive: 50,
-  declip: 40,
-  dereverb: 20,
+  deplosive: 0,
+  declip: 15,
+  dereverb: 0,
 };
 
 export interface RepairResult {

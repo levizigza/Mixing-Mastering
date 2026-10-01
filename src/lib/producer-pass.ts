@@ -1,15 +1,13 @@
 /**
- * Producer Pass — clarity-first intangibles polish.
+ * Producer Pass — optional, restrained intangibles polish.
  *
- * Multiple listens, but every move is gated: if a take gets muddier or
- * quieter, it is discarded. No bass/warmth boosts. Ends with the shared
- * Clarity Lock so muddy output cannot leave this stage.
+ * Opt-in only. Does NOT stack mud EQ or clarity locks (those live elsewhere).
+ * At most: tiny kick-mask duck + light parallel glue, each gated for clarity.
  */
 
 import { detectSonicCharacter, SonicCharacter } from '@/lib/sonic-character';
 import { SongSection } from '@/types/audio';
 import {
-  applyClarityLock,
   measureClarity,
   preferClearer,
   signalRms,
@@ -30,14 +28,6 @@ export interface ProducerPassOptions {
   signal?: AbortSignal;
 }
 
-interface BiquadCoeffs {
-  b0: number;
-  b1: number;
-  b2: number;
-  a1: number;
-  a2: number;
-}
-
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     const err = new Error('Producer Pass cancelled');
@@ -50,37 +40,6 @@ async function yieldToUI() {
   await new Promise<void>((r) => setTimeout(r, 0));
 }
 
-function calcPeaking(freq: number, gain: number, Q: number, sr: number): BiquadCoeffs {
-  const A = Math.pow(10, gain / 40);
-  const w0 = (2 * Math.PI * freq) / sr;
-  const alpha = Math.sin(w0) / (2 * Q);
-  const b0 = 1 + alpha * A;
-  const b1 = -2 * Math.cos(w0);
-  const b2 = 1 - alpha * A;
-  const a0 = 1 + alpha / A;
-  const a1 = -2 * Math.cos(w0);
-  const a2 = 1 - alpha / A;
-  return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
-}
-
-function processBiquad(data: Float32Array, c: BiquadCoeffs): Float32Array {
-  const out = new Float32Array(data.length);
-  let x1 = 0,
-    x2 = 0,
-    y1 = 0,
-    y2 = 0;
-  for (let i = 0; i < data.length; i++) {
-    const x = data[i];
-    const y = c.b0 * x + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
-    out[i] = y;
-    x2 = x1;
-    x1 = x;
-    y2 = y1;
-    y1 = y;
-  }
-  return out;
-}
-
 function createBuffer(L: Float32Array, R: Float32Array, sr: number, stereo: boolean): AudioBuffer {
   const ctx = new OfflineAudioContext(stereo ? 2 : 1, L.length, sr);
   const buf = ctx.createBuffer(stereo ? 2 : 1, L.length, sr);
@@ -89,7 +48,6 @@ function createBuffer(L: Float32Array, R: Float32Array, sr: number, stereo: bool
   return buf;
 }
 
-/** Tiny parallel glue — dry stays dominant; wet gain-matched. */
 function lightParallelGlue(
   L: Float32Array,
   R: Float32Array,
@@ -97,13 +55,13 @@ function lightParallelGlue(
   wet: number
 ): { L: Float32Array; R: Float32Array } {
   if (wet < 0.03) return { L, R };
-  wet = Math.min(0.1, wet);
+  wet = Math.min(0.07, wet);
   const compL = new Float32Array(L.length);
   const compR = new Float32Array(R.length);
-  const thresh = 0.35;
-  const ratio = 1.5;
-  const att = 1 - Math.exp(-1 / (sr * 0.025));
-  const rel = 1 - Math.exp(-1 / (sr * 0.25));
+  const thresh = 0.38;
+  const ratio = 1.45;
+  const att = 1 - Math.exp(-1 / (sr * 0.028));
+  const rel = 1 - Math.exp(-1 / (sr * 0.28));
   let env = 0;
   for (let i = 0; i < L.length; i++) {
     const mono = (Math.abs(L[i]) + Math.abs(R[i])) * 0.5;
@@ -124,7 +82,7 @@ function lightParallelGlue(
   return { L: outL, R: outR };
 }
 
-/** Kick mask: duck only 220–400 Hz when the low end speaks. No side collapse. */
+/** Duck only 230–380 Hz when kick speaks — no side collapse. */
 function kickPocket(
   L: Float32Array,
   R: Float32Array,
@@ -134,26 +92,25 @@ function kickPocket(
   if (amount < 0.05) return { L, R };
   const outL = new Float32Array(L.length);
   const outR = new Float32Array(R.length);
-  const aKick = Math.exp((-2 * Math.PI * 90) / sr);
-  const aLo = Math.exp((-2 * Math.PI * 220) / sr);
-  const aHi = Math.exp((-2 * Math.PI * 400) / sr);
+  const aKick = Math.exp((-2 * Math.PI * 85) / sr);
+  const aLo = Math.exp((-2 * Math.PI * 230) / sr);
+  const aHi = Math.exp((-2 * Math.PI * 380) / sr);
   const att = 1 - Math.exp(-1 / (sr * 0.004));
-  const rel = 1 - Math.exp(-1 / (sr * 0.08));
+  const rel = 1 - Math.exp(-1 / (sr * 0.09));
   let kickLp = 0;
   let env = 0;
   let loL = 0,
     hiL = 0,
     loR = 0,
     hiR = 0;
-  const maxDuck = 0.12 * amount;
+  const maxDuck = 0.08 * amount;
 
   for (let i = 0; i < L.length; i++) {
     const mid = (L[i] + R[i]) * 0.5;
     kickLp = mid + (kickLp - mid) * aKick;
     const kickAbs = Math.abs(kickLp);
     env += (kickAbs > env ? att : rel) * (kickAbs - env);
-    const duck = Math.min(maxDuck, env * amount * 1.4);
-
+    const duck = Math.min(maxDuck, env * amount * 1.2);
     loL = L[i] + (loL - L[i]) * aLo;
     hiL = L[i] + (hiL - L[i]) * aHi;
     loR = R[i] + (loR - R[i]) * aLo;
@@ -164,57 +121,9 @@ function kickPocket(
   return { L: outL, R: outR };
 }
 
-/** Unity-mean arrangement contrast — never turns the song down overall. */
-function arrangementBreathe(
-  L: Float32Array,
-  R: Float32Array,
-  sr: number,
-  sections: SongSection[],
-  intensity: number
-): { L: Float32Array; R: Float32Array; note: string } {
-  const curve = new Float32Array(L.length);
-  curve.fill(1);
-  if (sections.length >= 2) {
-    for (const s of sections) {
-      const start = Math.max(0, Math.floor(s.start * sr));
-      const end = Math.min(L.length, Math.floor(s.end * sr));
-      let g = 1;
-      if (s.kind === 'chorus') g = 1 + 0.014 * intensity;
-      else if (s.kind === 'verse' || s.kind === 'bridge' || s.kind === 'outro') g = 1 - 0.008 * intensity;
-      else if (s.kind === 'intro') g = 1 - 0.006 * intensity;
-      for (let i = start; i < end; i++) curve[i] = g;
-    }
-  } else {
-    for (let i = 0; i < L.length; i++) {
-      curve[i] = 1 + (Math.sin(Math.PI * (i / L.length)) - 0.5) * 0.008 * intensity;
-    }
-  }
-  const smoothN = Math.max(1, Math.floor(sr * 0.08));
-  for (let i = 1; i < L.length; i++) {
-    curve[i] = curve[i - 1] + (1 / smoothN) * (curve[i] - curve[i - 1]);
-  }
-  let sum = 0;
-  for (let i = 0; i < L.length; i++) sum += curve[i];
-  const mean = sum / L.length || 1;
-  const outL = new Float32Array(L.length);
-  const outR = new Float32Array(R.length);
-  for (let i = 0; i < L.length; i++) {
-    const g = curve[i] / mean;
-    outL[i] = L[i] * g;
-    outR[i] = R[i] * g;
-  }
-  return {
-    L: outL,
-    R: outR,
-    note: sections.length
-      ? `Arrangement contrast across ${sections.length} sections (unity-mean)`
-      : 'Gentle arc (unity-mean)',
-  };
-}
-
 export async function applyProducerPass(
   buffer: AudioBuffer,
-  sections: SongSection[] = [],
+  _sections: SongSection[] = [],
   options: ProducerPassOptions = {}
 ): Promise<ProducerPassResult> {
   const { onProgress, signal } = options;
@@ -223,111 +132,77 @@ export async function applyProducerPass(
   const stereo = buffer.numberOfChannels >= 2;
 
   throwIfAborted(signal);
-  onProgress?.(4, 'Producer Pass: first listen — clarity baseline...');
+  onProgress?.(6, 'Producer Pass: listening...');
   await yieldToUI();
 
   const analysis = detectSonicCharacter(buffer);
-  const soft =
-    analysis.character === 'minimal' ||
-    analysis.character === 'moody' ||
-    analysis.character === 'atmospheric' ||
-    analysis.character === 'soulful';
-
   let intensity =
     typeof options.intensity === 'number'
-      ? Math.max(0.2, Math.min(0.55, options.intensity))
-      : 0.32 + analysis.traits.energy * 0.1;
-  if (soft) intensity *= 0.85;
-  intensity = Math.max(0.25, Math.min(0.48, intensity));
+      ? Math.max(0.2, Math.min(0.45, options.intensity))
+      : 0.28 + analysis.traits.energy * 0.08;
+  intensity = Math.max(0.22, Math.min(0.4, intensity));
 
-  notes.push(
-    `Producer Pass · ${analysis.character} · intensity ${Math.round(intensity * 100)}%`
-  );
-  notes.push('Clarity-gated listens — no bass boost, no loudness drop, mud takes rejected.');
+  notes.push(`Producer Pass · ${analysis.character} · intensity ${Math.round(intensity * 100)}%`);
+  notes.push('Restrained polish — no mud EQ stack, no clarity re-carve, no arrangement ducking.');
 
   let current = buffer;
-  let baseline = measureClarity(current);
-  notes.push(
-    `Listen 1 · clarity ${baseline.clarity.toFixed(2)} · mud ${baseline.mudRatio.toFixed(2)}`
-  );
-  let listensDone = 1;
+  const baseline = measureClarity(current);
+  notes.push(`Baseline mud ${baseline.mudRatio.toFixed(2)} · clarity ${baseline.clarity.toFixed(2)}`);
 
-  // ── Listen 2: kick pocket only (subtractive) ─────────────────
+  // If already clear, do almost nothing (studio restraint)
+  if (baseline.mudRatio < 0.85 && baseline.clarity > 0.55) {
+    onProgress?.(100, 'Producer Pass: mix already coherent — light touch only');
+    notes.push('Mix already coherent — skipped pocket/glue to preserve fidelity.');
+    return {
+      buffer: current,
+      notes,
+      listens: 1,
+      cohesionScore: baseline.clarity,
+      character: analysis.character,
+    };
+  }
+
   throwIfAborted(signal);
-  onProgress?.(28, 'Producer Pass: listen 2 — kick pocket...');
+  onProgress?.(40, 'Producer Pass: kick pocket...');
   await yieldToUI();
   {
     let L = new Float32Array(current.getChannelData(0));
     let R = new Float32Array(stereo ? current.getChannelData(1) : current.getChannelData(0));
     const target = signalRms(L, R);
-    const pocketed = kickPocket(L, R, sr, intensity * 0.65);
+    const pocketed = kickPocket(L, R, sr, intensity * 0.55);
     L = new Float32Array(pocketed.L);
     R = new Float32Array(pocketed.R);
     matchRmsLevel(L, R, target);
-    const candidate = createBuffer(L, R, sr, stereo);
-    const gate = preferClearer(candidate, current);
+    const gate = preferClearer(createBuffer(L, R, sr, stereo), current);
     current = gate.buffer;
-    notes.push(`Listen 2: kick pocket · ${gate.reason}`);
-    listensDone = 2;
+    notes.push(`Kick pocket · ${gate.reason}`);
   }
 
-  // ── Listen 3: very light parallel glue (gated) ───────────────
   throwIfAborted(signal);
-  onProgress?.(50, 'Producer Pass: listen 3 — light glue...');
+  onProgress?.(75, 'Producer Pass: light glue...');
   await yieldToUI();
   {
     let L = new Float32Array(current.getChannelData(0));
     let R = new Float32Array(stereo ? current.getChannelData(1) : current.getChannelData(0));
     const target = signalRms(L, R);
-    const glued = lightParallelGlue(L, R, sr, soft ? 0.04 : 0.07);
+    const glued = lightParallelGlue(L, R, sr, 0.05);
     L = new Float32Array(glued.L);
     R = new Float32Array(glued.R);
     matchRmsLevel(L, R, target);
-    const candidate = createBuffer(L, R, sr, stereo);
-    const gate = preferClearer(candidate, current);
+    const gate = preferClearer(createBuffer(L, R, sr, stereo), current);
     current = gate.buffer;
-    notes.push(`Listen 3: parallel glue · ${gate.reason}`);
-    listensDone = 3;
+    notes.push(`Parallel glue · ${gate.reason}`);
   }
-
-  // ── Listen 4: arrangement breathe (unity-mean, gated) ────────
-  throwIfAborted(signal);
-  onProgress?.(68, 'Producer Pass: listen 4 — arrangement contrast...');
-  await yieldToUI();
-  {
-    let L = new Float32Array(current.getChannelData(0));
-    let R = new Float32Array(stereo ? current.getChannelData(1) : current.getChannelData(0));
-    const arr = arrangementBreathe(L, R, sr, sections, intensity);
-    const candidate = createBuffer(new Float32Array(arr.L), new Float32Array(arr.R), sr, stereo);
-    const gate = preferClearer(candidate, current);
-    current = gate.buffer;
-    notes.push(`Listen 4: ${arr.note} · ${gate.reason}`);
-    listensDone = 4;
-  }
-
-  // ── Always finish with Clarity Lock (permanent) ──────────────
-  throwIfAborted(signal);
-  onProgress?.(82, 'Producer Pass: clarity lock...');
-  await yieldToUI();
-  const locked = await applyClarityLock(current, (p, m) =>
-    onProgress?.(82 + Math.round(p * 0.16), m)
-  );
-  // Prefer locked only if clearer; otherwise keep current
-  const finalGate = preferClearer(locked.buffer, current);
-  current = finalGate.buffer;
-  notes.push(...locked.notes.map((n) => `Clarity lock: ${n}`));
-  notes.push(`Final gate: ${finalGate.reason}`);
 
   const after = measureClarity(current);
   notes.push(
     `Done · clarity ${baseline.clarity.toFixed(2)} → ${after.clarity.toFixed(2)} · mud ${baseline.mudRatio.toFixed(2)} → ${after.mudRatio.toFixed(2)}`
   );
-
   onProgress?.(100, 'Producer Pass complete');
   return {
     buffer: current,
     notes,
-    listens: listensDone,
+    listens: 2,
     cohesionScore: after.clarity,
     character: analysis.character,
   };

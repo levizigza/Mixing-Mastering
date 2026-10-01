@@ -476,13 +476,13 @@ export interface MasteringApproachParams {
 const DEFAULT_MASTERING_APPROACH: MasteringApproachParams = {
   targetLUFS: -14,
   truePeakCeiling: -1,
-  multibandAggression: 0.4,
-  stereoWidenAmount: 0.3,
-  harmonicExcitement: 0.25,
-  lowEndBoost: 0.5,
-  airBoost: 1.0,
-  busCompGlue: 0.4,
-  analogWarmth: 0.3,
+  multibandAggression: 0.32,
+  stereoWidenAmount: 0.25,
+  harmonicExcitement: 0.15,
+  lowEndBoost: 0.2,
+  airBoost: 0.7,
+  busCompGlue: 0.3,
+  analogWarmth: 0.12,
 };
 
 /**
@@ -581,29 +581,18 @@ export async function applyMasteringChain(
     L = processBiquad(L, hpf);
     R = processBiquad(R, hpf);
 
-    // Mud cut — stronger if dark / low-heavy
-    const mudCut =
-      tilt === 'dark' ? -1.8 :
-      analysis.freqBalance.low > 0.55 ? -1.4 :
-      analysis.freqBalance.low > 0.45 ? -0.8 : -0.4;
-    if (mudCut < -0.2) {
-      const mud = calcPeakingCoeffs(280, mudCut, 1.4, sr);
+    // One light mud touch only when clearly dark/low-heavy — Corrective owns the rest
+    if (tilt === 'dark' && analysis.freqBalance.low > 0.55) {
+      const mud = calcPeakingCoeffs(300, -0.7, 1.4, sr);
       L = processBiquad(L, mud);
       R = processBiquad(R, mud);
     }
 
     // Harshness cut if bright
-    if (tilt === 'bright' || analysis.freqBalance.high > 0.45) {
-      const harsh = calcPeakingCoeffs(3500, -1.2, 2.0, sr);
+    if (tilt === 'bright' || analysis.freqBalance.high > 0.5) {
+      const harsh = calcPeakingCoeffs(3800, -0.8, 1.8, sr);
       L = processBiquad(L, harsh);
       R = processBiquad(R, harsh);
-    }
-
-    // Boxiness
-    if (analysis.freqBalance.mid > 0.4) {
-      const box = calcPeakingCoeffs(450, -0.8, 1.6, sr);
-      L = processBiquad(L, box);
-      R = processBiquad(R, box);
     }
   }
 
@@ -682,19 +671,19 @@ export async function applyMasteringChain(
       R = processBiquad(R, ls);
     }
 
-    // Presence lift for dark mixes
+    // Presence lift for dark mixes — keep modest
     const presence =
-      tilt === 'dark' ? 1.2 :
-      analysis.freqBalance.high < 0.2 ? 0.9 : 0.35;
+      tilt === 'dark' ? 0.7 :
+      analysis.freqBalance.high < 0.18 ? 0.55 : 0.25;
     if (presence > 0.2) {
-      const pe = calcPeakingCoeffs(3200, presence, 1.1, sr);
+      const pe = calcPeakingCoeffs(3200, presence, 1.15, sr);
       L = processBiquad(L, pe);
       R = processBiquad(R, pe);
     }
 
-    const air = params.airBoost + (tilt === 'dark' ? 0.6 : tilt === 'bright' ? -0.5 : 0);
+    const air = Math.min(1.2, params.airBoost + (tilt === 'dark' ? 0.35 : tilt === 'bright' ? -0.4 : 0));
     if (Math.abs(air) > 0.15) {
-      const hs = calcHighShelfCoeffs(10000, Math.max(-1.5, Math.min(2.5, air)), 0.6, sr);
+      const hs = calcHighShelfCoeffs(11000, Math.max(-1.0, Math.min(1.2, air)), 0.65, sr);
       L = processBiquad(L, hs);
       R = processBiquad(R, hs);
     }
@@ -721,12 +710,7 @@ export async function applyMasteringChain(
       side[i] = sideLP[i] * 0.15 + sideHP[i] * sideGain; // mostly kill low side
     }
 
-    // Slight mid clarity if muddy
-    if (analysis.freqBalance.low > 0.5) {
-      const midMud = calcPeakingCoeffs(250, -0.6, 1.3, sr);
-      const midClean = processBiquad(mid, midMud);
-      mid.set(midClean);
-    }
+    // No extra mid mud cut here — already owned upstream
 
     const lr = fromMidSide(mid, side);
     L = lr.L;
@@ -744,9 +728,9 @@ export async function applyMasteringChain(
       const ratio = 1.5 + glue * 1.5;
       const attack = 0.02; // 20 ms — let transients through
       const release = 0.15;
-      const makeup = glue * 1.5;
-      L = compressBusSC(L, sr, thr - glue * 4, ratio, attack, release, makeup, 100);
-      R = compressBusSC(R, sr, thr - glue * 4, ratio, attack, release, makeup, 100);
+      const makeup = glue * 0.8;
+      L = compressBusSC(L, sr, thr - glue * 3, ratio, attack, release, makeup, 100);
+      R = compressBusSC(R, sr, thr - glue * 3, ratio, attack, release, makeup, 100);
     }
   }
 
@@ -759,9 +743,9 @@ export async function applyMasteringChain(
     let driveDb = 0;
     if (preLUFS > -Infinity && isFinite(preLUFS)) {
       // Drive into the limiter: aim a bit above target so limiter catches peaks
-      driveDb = (params.targetLUFS + 1.5) - preLUFS;
-      // Cap drive — avoid >8 dB GR (audible squashing)
-      driveDb = Math.max(-3, Math.min(alreadyCrushed ? 3 : 8, driveDb));
+      driveDb = (params.targetLUFS + 0.8) - preLUFS;
+      // Cap drive — heavy limiter drive was a primary mud/pump source
+      driveDb = Math.max(-2, Math.min(alreadyCrushed ? 2.5 : 4, driveDb));
     }
     if (Math.abs(driveDb) > 0.05) {
       const g = Math.pow(10, driveDb / 20);
