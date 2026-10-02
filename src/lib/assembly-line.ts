@@ -45,7 +45,7 @@ export const ASSEMBLY_STAGE_LABELS: Record<AssemblyStageId, string> = {
   fix: 'Correct',
   level: 'Level',
   balance: 'Stem Balance',
-  pocket: 'Vocal Pocket',
+  pocket: 'Vocal Clarity',
   tune: 'Studio Tune',
   hit: 'Smart Enhance',
   producer: 'Producer Pass',
@@ -103,7 +103,7 @@ export interface AssemblyLineOptions {
   studioTune?: boolean;
   /** Surgical resonance notches (default true) */
   resonanceCleanup?: boolean;
-  /** Center vocal ride + pocket carve (default true) */
+  /** Mid-only vocal clarity — ride/presence/de-ess; sides preserved (default true) */
   vocalPocket?: boolean;
   /**
    * Optional multi-stem auto-balance (default false — heavier path).
@@ -502,11 +502,11 @@ export async function runAssemblyLine(
     });
   }
 
-  // ── 7. Vocal pocket (center ride + carve) ────────────────────
+  // ── 7. Vocal clarity (mid-only; sides/instrumental preserved) ─
   let afterPocket = afterBalance;
   if (vocalPocket) {
     throwIfAborted(signal);
-    onProgress?.(stemBalance ? 53 : 41, 'pocket', 'Vocal pocket — sitting the lead...');
+    onProgress?.(stemBalance ? 53 : 41, 'pocket', 'Vocal clarity — center lead, sides intact...');
     await yieldToUI();
     const pocket = await applyVocalPocket(
       afterBalance,
@@ -523,7 +523,7 @@ export async function runAssemblyLine(
     stageNotes.push({
       stage: 'pocket',
       label: ASSEMBLY_STAGE_LABELS.pocket,
-      notes: ['Vocal pocket skipped.'],
+      notes: ['Vocal clarity skipped.'],
     });
   }
 
@@ -745,7 +745,7 @@ export async function runAssemblyLine(
     'correct',
     'level',
     stemBalance ? 'stem balance' : null,
-    vocalPocket ? 'vocal pocket' : null,
+    vocalPocket ? 'vocal clarity' : null,
     studioTune ? 'studio tune' : null,
     hitMaker ? 'enhance' : null,
     producerPass ? 'producer pass' : null,
